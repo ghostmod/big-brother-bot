@@ -17,6 +17,8 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #
 # CHANGELOG
+#   2012/04/11 - 1.12 - Courgette
+#   * changes default value for warn_command_abusers to False
 #   2011/11/15 - 1.11.4 - Courgette
 #   * fix bug where command &rules was acting like !rules
 #   2011/11/15 - 1.11.3 - Courgette
@@ -94,7 +96,7 @@
 #    Added data field to warnClient(), warnKick(), and checkWarnKick()
 #
 
-__version__ = '1.11.4'
+__version__ = '1.12'
 __author__  = 'ThorN, xlr8or, Courgette'
 
 import re, time, threading, sys, traceback, thread, random
@@ -152,11 +154,11 @@ class AdminPlugin(b3.plugin.Plugin):
         try:
             self._warn_command_abusers = self.config.getboolean('warn', 'warn_command_abusers')
         except ConfigParser.NoOptionError:
-            self.warning('conf warn\warn_command_abusers not found, using default : yes')
-            self._warn_command_abusers = True
+            self.warning('conf warn\warn_command_abusers not found, using default : no')
+            self._warn_command_abusers = False
         except ValueError:
-            self.warning('invalid value for conf warn\warn_command_abusers, using default : yes')
-            self._warn_command_abusers = True
+            self.warning('invalid value for conf warn\warn_command_abusers, using default : no')
+            self._warn_command_abusers = False
 
 
         if 'commands' in self.config.sections():
@@ -305,7 +307,7 @@ class AdminPlugin(b3.plugin.Plugin):
                         self.debug('Error getting Tkinfo: %s', e)
                     self.debug('End of Tkinfo')
 
-        elif len(event.data) >= 2 and (event.data[:1] == self.cmdPrefix or event.data[:1] == self.cmdPrefixLoud or event.data[:1] == self.cmdPrefixBig):
+        elif len(event.data) >= 2 and event.data[:1] in (self.cmdPrefix, self.cmdPrefixLoud, self.cmdPrefixBig):
             # catch the confirm command for identification of the B3 devs
             if event.data[1:] == 'confirm':
                 self.debug('checking confirmation...')
@@ -314,7 +316,7 @@ class AdminPlugin(b3.plugin.Plugin):
             else:
                 self.debug('Handle command %s' % event.data)
 
-            if event.data[1:2] == self.cmdPrefix or event.data[1:2] == self.cmdPrefixLoud or event.data[1:2] == self.cmdPrefixBig or event.data[1:2] == '1':
+            if event.data[1:2] in (self.cmdPrefix, self.cmdPrefixLoud, self.cmdPrefixBig, '1'):
                 # self.is the alias for say
                 cmd = 'say'
                 data = event.data[2:]
