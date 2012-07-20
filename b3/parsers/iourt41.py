@@ -705,7 +705,14 @@ class Iourt41Parser(AbstractParser):
                 if nguid != '':
                     guid = nguid
 
-                client = self.clients.newClient(bclient['cid'], name=bclient['name'], ip=bclient['ip'], state=b3.STATE_ALIVE, guid=guid, data={ 'guid' : guid })
+                client = self.clients.newClient(bclient['cid'],
+                    name=bclient['name'],
+                    ip=bclient['ip'],
+                    state=b3.STATE_ALIVE,
+                    guid=guid,
+                    funblue=bclient.get('funblue', ''),
+                    funred=bclient.get('funred', ''),
+                    data={ 'guid' : guid })
 
             # update existing client
             for k, v in bclient.iteritems():
