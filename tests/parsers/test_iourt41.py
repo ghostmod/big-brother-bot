@@ -376,6 +376,114 @@ class Test_OnClientuserinfo(Iourt41TestCase):
         self.assertEqual('145.99.135.227', client.guid)
 
 
+class Test_funstuff(Iourt41TestCase):
+
+    def setUp(self):
+        super(Test_funstuff, self).setUp()
+        self.console.PunkBuster = None
+
+        self.events = []
+        def queueEvent(event):
+            self.events.append(event)
+
+        self.queueEvent_patcher = patch.object(self.console, "queueEvent", wraps=queueEvent)
+        self.queueEvent_mock = self.queueEvent_patcher.start()
+
+        self.console.startup()
+
+    def tearDown(self):
+        super(Test_funstuff, self).tearDown()
+        self.queueEvent_patcher.stop()
+
+
+    def test_OnClientuserinfochanged(self):
+        joe = Client(cid='2', team=b3.TEAM_BLUE)
+        self.console.clients["2"] = joe
+        data = r"2 n\joe\t\2\r\2\tl\0\f0\ninja\f1\goggles\f2\spikeypp\a0\0\a1\0\a2\255"
+        self.console.OnClientuserinfochanged(action=None, data=data)
+        self.assertEqual('ninja,goggles,spikeypp', getattr(joe, 'funblue', None))
+
+
+    def test_OnClientuserinfochanged_2(self):
+        joe = Client(cid='2')
+        self.console.clients["2"] = joe
+        data = r"2 n\laCourge\t\1\r\2\tl\0\f0\ninja\f1\goggles\f2\\a0\0\a1\0\a2\255"
+        self.console.OnClientuserinfochanged(action=None, data=data)
+        self.assertEqual('ninja,goggles', getattr(joe, 'funred', None))
+
+
+    def test_OnClientuserinfo_non_existing_client(self):
+        infoline = r"2 \ip\192.168.1.2:27961\name\laCourge\racered\2\raceblue\2\rate\8000\ut_timenudge\0\cg_rgb\128 128 128\funred\capor\funblue\ninja,goggles\cg_predictitems\0\cg_physics\1\snaps\20\model\sarge\headmodel\sarge\team_model\james\team_headmodel\*james\color1\4\color2\5\handicap\100\sex\male\cl_anonymous\0\gear\GLAOWTA\teamtask\0\cl_guid\EF526C67C769FCAAC7E225B53278B554\weapmodes\00000101220000020002"
+        self.assertFalse('2' in self.console.clients)
+        self.console.OnClientuserinfo(action=None, data=infoline)
+        self.assertTrue('2' in self.console.clients)
+        client = self.console.clients['2']
+        self.assertEqual('capor', getattr(client, 'funred', None))
+        self.assertEqual('ninja,goggles', getattr(client, 'funblue', None))
+        # check events
+        events_type = map(lambda x: self.console.getEventName(x.type), self.events)
+        self.assertNotIn('Client funstuff change', events_type)
+
+
+    def test_OnClientuserinfo_existing_client(self):
+        self.assertFalse('2' in self.console.clients)
+
+        infoline = r"2 \ip\192.168.1.2:27961\name\laCourge\racered\2\raceblue\2\rate\8000\ut_timenudge\0\cg_rgb\128 128 128\funred\\funblue\\cg_predictitems\0\cg_physics\1\snaps\20\model\sarge\headmodel\sarge\team_model\james\team_headmodel\*james\color1\4\color2\5\handicap\100\sex\male\cl_anonymous\0\gear\GLAOWTA\teamtask\0\cl_guid\EF526C67C769FCAAC7E225B53278B554\weapmodes\00000101220000020002"
+        self.console.OnClientuserinfo(action=None, data=infoline)
+        self.assertTrue('2' in self.console.clients)
+        client = self.console.clients['2']
+        self.assertEqual('', getattr(client, 'funred', None))
+        self.assertEqual('', getattr(client, 'funblue', None))
+
+        self.events = []
+
+        infoline = r"2 \ip\192.168.1.2:27961\name\laCourge\racered\2\raceblue\2\rate\8000\ut_timenudge\0\cg_rgb\128 128 128\funred\capor,bar\funblue\ninja,goggles,foo\cg_predictitems\0\cg_physics\1\snaps\20\model\sarge\headmodel\sarge\team_model\james\team_headmodel\*james\color1\4\color2\5\handicap\100\sex\male\cl_anonymous\0\gear\GLAOWTA\teamtask\0\cl_guid\EF526C67C769FCAAC7E225B53278B554\weapmodes\00000101220000020002"
+        self.console.OnClientuserinfo(action=None, data=infoline)
+        self.assertEqual('capor,bar', getattr(client, 'funred', None))
+        self.assertEqual('ninja,goggles,foo', getattr(client, 'funblue', None))
+
+        # check events
+        events_type = map(lambda x: self.console.getEventName(x.type), self.events)
+        self.assertIn('Client funstuff change', events_type)
+        event_funred = filter(lambda x: self.console.getEventName(x.type) == 'Client funstuff change' and x.data['type'] == 'funred', self.events)[0]
+        self.assertEqual({'type': 'funred', 'before': '', 'after': 'capor,bar'}, event_funred.data)
+        event_funblue = filter(lambda x: self.console.getEventName(x.type) == 'Client funstuff change' and x.data['type'] == 'funblue', self.events)[0]
+        self.assertEqual({'type': 'funblue', 'before': '', 'after': 'ninja,goggles,foo'}, event_funblue.data)
+
+
+    def test_connection_sequence(self):
+        self.assertFalse('2' in self.console.clients)
+
+        # simulate client connection (no team yet)
+        ClientUserinfo = r"2 \ip\192.168.1.2:27961\name\laCourge\racered\2\raceblue\2\rate\8000\ut_timenudge\0\cg_rgb\128 128 128\funred\capor\funblue\ninja,goggles\cg_predictitems\0\cg_physics\1\snaps\20\model\sarge\headmodel\sarge\team_model\james\team_headmodel\*james\color1\4\color2\5\handicap\100\sex\male\cl_anonymous\0\gear\GLAOWTA\teamtask\0\cl_guid\EF526C67C769FCAAC7E225B53278B554\weapmodes\00000101220000020002"
+        self.console.OnClientuserinfo(action=None, data=ClientUserinfo)
+        self.console.OnClientuserinfochanged(action=None, data=r"2 n\laCourge\t\3\r\2\tl\0\f0\\f1\\f2\\a0\255\a1\255\a2\255")
+
+        # simulate join red team
+        self.console.OnClientuserinfochanged(action=None, data=r"2 n\laCourge\t\1\r\2\tl\0\f0\capor\f1\\f2\\a0\255\a1\255\a2\255")
+
+        self.assertTrue('2' in self.console.clients)
+        client = self.console.clients['2']
+        self.assertEqual('capor', getattr(client, 'funred', None))
+        self.assertEqual('ninja,goggles', getattr(client, 'funblue', None))
+
+        # check events
+        events_type = map(lambda x: self.console.getEventName(x.type), self.events)
+        self.assertNotIn('Client funstuff change', events_type)
+
+        self.events = []
+        self.console.OnClientuserinfochanged(action=None, data=r"2 n\laCourge\t\1\r\2\tl\0\f0\capor\f1\foo\f2\\a0\255\a1\255\a2\255")
+
+        # check events
+        events_type = map(lambda x: self.console.getEventName(x.type), self.events)
+        self.assertIn('Client funstuff change', events_type)
+        self.assertEqual(1, len(events_type))
+        event = self.events[0]
+        self.assertEqual({'type': 'funred', 'before': 'capor', 'after': 'capor,foo'}, event.data)
+        self.assertEqual(client, event.client)
+        self.assertEqual(self.console.getEventID('EVT_CLIENT_FUNSTUFF_CHANGE'), event.type)
+
+
 
 
 class Test_pluginsStarted(Iourt41TestCase):
