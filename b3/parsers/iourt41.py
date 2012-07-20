@@ -158,9 +158,11 @@
 #     * fixes issue with kill events when killed by UT_MOD_SLAPPED, UT_MOD_NUKED, MOD_TELEFRAG
 # 07/07/2012 - 1.13.2 - Courgette
 #     * ensures the config file has option 'game_log' in section 'server'
+# 21/07/2012 - 1.14 - Courgette
+#     * add event EVT_CLIENT_FUNSTUFF_CHANGE
 #
 __author__  = 'xlr8or, Courgette'
-__version__ = '1.13.2'
+__version__ = '1.14d'
 
 import re, string, time, os, thread
 from b3.parsers.q3a.abstractParser import AbstractParser
@@ -389,7 +391,8 @@ class Iourt41Parser(AbstractParser):
         self.Events.createEvent('EVT_GAME_FLAG_RETURNED', 'Flag returned')
         self.Events.createEvent('EVT_CLIENT_GEAR_CHANGE', 'Client gear change')
         self.Events.createEvent('EVT_SURVIVOR_WIN', 'Survivor Winner')
-        
+        self.Events.createEvent('EVT_CLIENT_FUNSTUFF_CHANGE', 'Client funstuff change')
+
         # add the world client
         self.clients.newClient('-1', guid='WORLD', name='World', hide=True, pbid='WORLD')
 
@@ -488,7 +491,7 @@ class Iourt41Parser(AbstractParser):
         if info[:1] != '\\':
             info = '\\' + info
 
-        options = re.findall(r'\\([^\\]+)\\([^\\]+)', info)
+        options = re.findall(r'\\([^\\]+)\\([^\\]*)', info)
 
         data = {}
         for o in options:
@@ -651,13 +654,7 @@ class Iourt41Parser(AbstractParser):
         if bclient:
             client = self.clients.getByCID(bclient['cid'])
 
-            if client:
-                # update existing client
-                for k, v in bclient.iteritems():
-                    if hasattr(client, 'gear') and k == 'gear' and client.gear != v:
-                        self.queueEvent(b3.events.Event(b3.events.EVT_CLIENT_GEAR_CHANGE, v, client))
-                    setattr(client, k, v)
-            else:
+            if not client:
                 #make a new client
                 if self.PunkBuster:
                     # we will use punkbuster's guid
@@ -710,6 +707,15 @@ class Iourt41Parser(AbstractParser):
 
                 client = self.clients.newClient(bclient['cid'], name=bclient['name'], ip=bclient['ip'], state=b3.STATE_ALIVE, guid=guid, data={ 'guid' : guid })
 
+            # update existing client
+            for k, v in bclient.iteritems():
+                if hasattr(client, 'gear') and k == 'gear' and client.gear != v:
+                    self.queueEvent(b3.events.Event(b3.events.EVT_CLIENT_GEAR_CHANGE, v, client))
+                if hasattr(client, 'funblue') and k == 'funblue' and client.funblue != v:
+                    self.queueEvent(b3.events.Event(b3.events.EVT_CLIENT_FUNSTUFF_CHANGE, {'type': 'funblue', 'before': client.funblue, 'after': v}, client))
+                if hasattr(client, 'funred') and k == 'funred' and client.funred != v:
+                    self.queueEvent(b3.events.Event(b3.events.EVT_CLIENT_FUNSTUFF_CHANGE, {'type': 'funred', 'before': client.funred, 'after': v}, client))
+                setattr(client, k, v)
         return None
 
     # when userinfo changes
@@ -737,10 +743,14 @@ class Iourt41Parser(AbstractParser):
                     if parseddata.has_key('f0') and parseddata['f0'] is not None \
                             and parseddata.has_key('f1') and parseddata['f1'] is not None \
                             and parseddata.has_key('f2') and parseddata['f2'] is not None :
-                        data = "%s,%s,%s" % (parseddata['f0'], parseddata['f1'], parseddata['f2'])
+                        data = ','.join([parseddata[x] for x in ('f0', 'f1', 'f2') if parseddata[x]])
                         if team == b3.TEAM_BLUE:
+                            if hasattr(client, 'funblue') and client.funblue != data:
+                                self.queueEvent(b3.events.Event(b3.events.EVT_CLIENT_FUNSTUFF_CHANGE, {'type': 'funblue', 'before': client.funblue, 'after': data}, client))
                             setattr(client, 'funblue', data)
                         elif team == b3.TEAM_RED:
+                            if hasattr(client, 'funred') and client.funred != data:
+                                self.queueEvent(b3.events.Event(b3.events.EVT_CLIENT_FUNSTUFF_CHANGE, {'type': 'funred', 'before': client.funred, 'after': data}, client))
                             setattr(client, 'funred', data)
                         
                 if parseddata.has_key('a0') and parseddata.has_key('a1') and parseddata.has_key('a2'):
