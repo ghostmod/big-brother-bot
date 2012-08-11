@@ -101,67 +101,74 @@ class BattleyeServer(threading.Thread):
             else:
                 self._isrunning = False
             
-            
         self.getLogger().debug("Ending Polling Thread")
+        self.stop()
 
     def run(self):
+        request = bytearray()
+        packet = bytearray()
         crc_error_count = 0
         self.getLogger().debug("Start Listening")
         self._isconnected = self.login()
         write_seq = 0
         last_write_time = time.time()
-        while self._isconnected and not self.isStopped() and self._isrunning:
+        while self._isconnected and not self.isStopped():
             if len(self.read_queue):
                 packet = self.read_queue.popleft()
                 type, sequence, data = self.decode_server_packet(packet)
-                if type == chr(2):
+                if type == 2:
                     # Acknowledge server message receipt
-                    request = self.encode_packet(chr(2), sequence)
+                    request = self.encode_packet(2, sequence, None)
+                    self.getLogger().debug("Server Message sequence was %s" % sequence)
                     self.write_queue.append(request)
                     last_write_time = time.time()
                     self._on_event( (2, data) )
-                elif type == chr(1):
-                    self.getLogger().debug('Command Response : %s' % repr(data))
+                elif type == 1:
+                    #self.getLogger().debug('Command Response : %s' % repr(data))
                     try:
-                        self.sent_data_seq.remove(ord(sequence))
-                    except KeyError:
+                        self.sent_data_seq.remove(sequence)
+                    except ValueError:
                         pass
                     crc_error_count = 0
                     if data:
                         self._on_event( (1, data) )
-                elif type == chr(255):
+                elif type == 255:
                     #CRC Error
                     crc_error_count += 1
                         
             if len(self.command_queue):
-                request = self.encode_packet(chr(1), chr(write_seq) + self.command_queue.popleft())
+                request = self.encode_packet(1, write_seq, self.command_queue.popleft())
                 self.write_queue.append(request)
                 last_write_time = time.time()
                 write_seq += 1
+                if write_seq > 255:
+                    write_seq -= 256
             elif len(self.say_queue):
-                request = self.encode_packet(chr(1), chr(write_seq) + self.say_queue.popleft())
+                request = self.encode_packet(1, write_seq, self.say_queue.popleft())
                 self.write_queue.append(request)
                 last_write_time = time.time()
                 write_seq += 1
+                if write_seq > 255:
+                    write_seq -= 256
             elif last_write_time + 30 < time.time():
-                request =  self.encode_packet(chr(1), chr(write_seq))
+                request =  self.encode_packet(1, write_seq, None)
                 self.write_queue.append(request)
                 last_write_time = time.time()
                 write_seq += 1
+                if write_seq > 255:
+                    write_seq -= 256
                 
             if crc_error_count > 10 or len(self.sent_data_seq) > 10:
+                self.getLogger().debug('CRC Errors %s   Commands not replied to %s' % (crc_error_count, self.sent_data_seq))
                 # 10 + consecutive crc errors or 10 commands not replied to
                 self.stop()
                 
         self.getLogger().debug("Ending Server Thread")
-        self._isconnected = False
                     
     def login(self):
         """authenticate on the Battleye server with given password"""
         self.getLogger().debug("Starting Login")
-        #crc1, crc2, crc3, crc4 = self.compute_crc(chr(255) + chr(0) + self.password)
-        #request = "BE" + chr(crc1) + chr(crc2) + chr(crc3) + chr(crc4) + '\xff' + chr(0) + self.password
-        request =  self.encode_packet(chr(0), self.password)
+        request =  self.encode_packet(0, None, self.password)
         self.getLogger().debug(self.write_queue)
         self.write_queue.append(request)
         self.getLogger().debug(self.write_queue)
@@ -174,11 +181,11 @@ class BattleyeServer(threading.Thread):
                 self.getLogger().debug("login response was %s %s %s" % (type, logged_in, data))
                 if type == chr(255):
                     self.getLogger().debug('Invalid packet')
-                elif type == chr(0):
+                elif type == 0:
                     login_response = True
 
         if login_response:
-            if logged_in == chr(1):
+            if logged_in == 1:
                 self.getLogger().debug("Login Successful")
                 return True
         else:
@@ -195,37 +202,51 @@ class BattleyeServer(threading.Thread):
         return int(crc32[8:10], 16), int(crc32[6:8], 16), int(crc32[4:6], 16), int(crc32[2:4], 16)
 
     def decode_server_packet(self, packet):
-        if packet[0:2] != 'BE':
-            return chr(255), '', ''
+        if packet[0:2] != b'BE':
+            return 255, '', ''
 
         packet_crc = packet[2:6]
-        self.getLogger().debug("Packet crc: %s" % repr(packet_crc))
+        #self.getLogger().debug("Packet crc: %s" % repr(packet_crc))
         crc1, crc2, crc3, crc4 =  self.compute_crc(packet[6:])
         computed_crc = chr(crc1) + chr(crc2) + chr(crc3) + chr(crc4)
         # self.getLogger().debug("Computed crc: %s" % repr(computed_crc))
         if packet_crc != computed_crc:
             self.getLogger().debug('Invalid crc')
-            return chr(255), '', ''
+            return 255, '', ''
 
-        type = packet[7:8]
-        sequence_no = packet[8:9]
+        type = ord(packet[7:8])
+        sequence_no = ord(packet[8:9])
         data = packet[9:]
         return type, sequence_no, data
 
-    def encode_packet(self, packet_type, data):
+    def encode_packet(self, packet_type, seq, data):
         data_to_send = bytearray()
-        try:
-            if data and isinstance(data, str):
-                data=unicode(data, errors='ignore')
-            data=data.encode('Latin-1', 'replace')
-        except Exception, msg:
-            self.getLogger().debug('ERROR encoding data: %r' % msg)
-            data = 'Encoding error'
-        self.getLogger().debug('Encoded data is %s' % data)
-        data_to_send = data_to_send + chr(255) + packet_type + bytearray(data, 'Latin-1', 'ignore')
+
+        #self.getLogger().debug('Encoded data is %s' % data)
+        #data_to_send = data_to_send + chr(255) + packet_type + bytearray(data, 'Latin-1', 'ignore')
+        data_to_send.append(255)
+        data_to_send.append(packet_type)
+        if seq != None:
+            data_to_send.append(seq)
+        if data:
+            try:
+                if data and isinstance(data, str):
+                    data=unicode(data, errors='ignore')
+                data=data.encode('Latin-1', 'replace')
+            except Exception, msg:
+                self.getLogger().debug('ERROR encoding data: %r' % msg)
+                data = 'Encoding error'
+                
+            data_to_send.extend(bytearray(data, 'Latin-1', 'ignore'))
         crc1, crc2, crc3, crc4 = self.compute_crc(data_to_send)
-        request =  "B" + "E" + chr(crc1) + chr(crc2) + chr(crc3) + chr(crc4) + data_to_send
-        self.getLogger().debug("Request is type : %s" % type(request))
+        # request =  "B" + "E" + chr(crc1) + chr(crc2) + chr(crc3) + chr(crc4) + data_to_send
+        request = bytearray(b'BE')
+        request.append(crc1)
+        request.append(crc2)
+        request.append(crc3)
+        request.append(crc4)
+        request.extend(data_to_send)
+        #self.getLogger().debug("Request is type : %s" % type(request))
         return request
         
     def __getattr__(self, name):

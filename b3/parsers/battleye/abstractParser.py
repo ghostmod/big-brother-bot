@@ -92,8 +92,9 @@ class AbstractParser(b3.parser.Parser):
     _multi_packet_response = {}
     _server_response_lock = False
     _server_response_timeout = 5
-    _regPlayer = re.compile(r'^(?P<cid>[0-9]+)\s+(?P<ip>[0-9.]+):(?P<port>[0-9]+)\s+(?P<ping>[0-9]+)\s+(?P<guid>[0-9a-f]+)\((?P<verified>[A-Z]+)\)\s+(?P<name>.*?)$', re.I)
-    _regPlayer_lobby = re.compile(r'^(?P<cid>[0-9]+)\s+(?P<ip>[0-9.]+):(?P<port>[0-9]+)\s+(?P<ping>[0-9]+)\s+(?P<guid>[0-9a-f]+)\((?P<verified>[A-Z]+)\)\s+(?P<name>.*?)(?P<lobby>\(Lobby\))$', re.I)
+    _player_list_errors = 0
+    _regPlayer = re.compile(r'^(?P<cid>[0-9]+)\s+(?P<ip>[0-9.]+):(?P<port>[0-9]+)\s+(?P<ping>[0-9-]+)\s+(?P<guid>[0-9a-f]+)\((?P<verified>[A-Z]+)\)\s+(?P<name>.*?)$', re.I)
+    _regPlayer_lobby = re.compile(r'^(?P<cid>[0-9]+)\s+(?P<ip>[0-9.]+):(?P<port>[0-9]+)\s+(?P<ping>[0-9-]+)\s+(?P<guid>[0-9a-f]+)\((?P<verified>[A-Z]+)\)\s+(?P<name>.*?)(?P<lobby>\(Lobby\))$', re.I)
     
     # if ban_with_server is True, then the Battleye server will be used for ban
     ban_with_server = True
@@ -111,7 +112,7 @@ class AbstractParser(b3.parser.Parser):
         #self.screen.flush()
 
         self.updateDocumentation()
-        server_logging = True
+        server_logging = self.load_protocol_logging()
         ## the block below can activate additional logging for the BattleyeServer class
         if server_logging:
             import logging
@@ -122,10 +123,10 @@ class AbstractParser(b3.parser.Parser):
             battleyeServerLogger.setLevel(logging.getLogger('output').level)
         
             ## This block will send the logging info to a separate file
-            FORMAT = "%(name)-20s [%(thread)-4d] %(threadName)-15s %(levelname)-8s %(message)s"
+            FORMAT = "%(asctime)s %(name)-20s [%(thread)-4d] %(threadName)-15s %(levelname)-8s %(message)s"
             #FORMAT = '%(asctime)s %(levelname)s %(message)s'
          
-            hdlr = logging.FileHandler('G:/b3-182/arma/logs/battleye.log')
+            hdlr = logging.FileHandler(server_logging)
             formatter = logging.Formatter(FORMAT)
             hdlr.setFormatter(formatter)
             battleyeServerLogger.addHandler(hdlr)
@@ -135,13 +136,6 @@ class AbstractParser(b3.parser.Parser):
             if not self._serverConnection or not self._serverConnection.connected:
                 try:
                     self.setup_battleye_connection()
-                except CommandError, err:
-                    if err.message[0] == 'InvalidPasswordHash':
-                        self.error("your rcon password is incorrect. Check setting 'rcon_password' in your main config file.")
-                        self.exitcode = 220
-                        break
-                    else:
-                        self.error(err.message)
                 except IOError, err:
                     self.error("IOError %s"% err)
                 except Exception, err:
@@ -260,6 +254,8 @@ class AbstractParser(b3.parser.Parser):
 #'Player #0 Bravo17 (76.108.91.78:2304) connected'
 #'Player #0 Bravo17 - GUID: 80a5885ebe2420bab5e158a310fcbc7d (unverified)'
 #'Verified GUID (80a5885ebe2420bab5e158a310fcbc7d) of player #0 Bravo17'
+#'Player #2 NZ (04b81a0bd914e7ba610ef3c0ffd66a1a) has been kicked by BattlEye: Script Restriction #107'
+#'Player #4 Kauldron disconnected'
 #(Lobby) Bravo17: hello b3'
 #(Global) Bravo17: global channel
 #Players on server:\n
@@ -284,32 +280,58 @@ class AbstractParser(b3.parser.Parser):
         self.info('Server Packet is %s' % packet)
         eventData = ''
         eventType = ''
-        if packet[0:12] == 'RCon admin #':
+        if packet.startswith('RCon admin #'):
             func = 'OnServerMessage'
             eventData = packet[12:]
         elif packet[0:8] == 'Player #':
             if packet[-9:] == 'connected':
                 func ='OnPlayerConnected'
                 eventData = packet[8:len(packet)-10]
+            elif packet[-12] == 'disconnected':
+                func ='OnPlayerLeave'
+                eventData = packet[8:len(packet)-13]
             elif packet[-12:] == '(unverified)':
                 func = 'OnUnverifiedGUID'
                 eventData = packet[8:len(packet)-13]
+            elif packet.find(' has been kicked by BattlEye: '):
+                func = 'OnBattleyeKick'
+                eventData = packet[8:]
             else:
                 self.debug('Unhandled server message %s' % packet)
+                eventData = None
+                func = 'OnUnknownEvent'
         elif packet[0:13] == 'Verified GUID':
             func = 'OnVerifiedGUID'
             eventData = (packet[15:])
         elif packet[0:7] == '(Lobby)':
             func = 'OnPlayerChat'
-            eventData = packet[7:]
+            eventData = packet[7:] + ' (Lobby)'
         elif packet[0:8] == '(Global)':
             func = 'OnPlayerChat'
-            eventData = packet[8:]
+            eventData = packet[8:] + ' (Global)'
+        elif packet[0:8] == '(Direct)':
+            func = 'OnPlayerChat'
+            eventData = packet[8:] + ' (Direct)'
+        elif packet[0:9] == '(Vehicle)':
+            func = 'OnPlayerChat'
+            eventData = packet[9:] + ' (Vehicle)'
+        elif packet[0:7] == '(Group)':
+            func = 'OnPlayerChat'
+            eventData = packet[7:] + ' (Group)'
+        elif packet[0:6] == '(Side)':
+            func = 'OnPlayerChat'
+            eventData = packet[6:] + ' (Side)'
+        elif packet[0:9] == '(Command)':
+            func = 'OnPlayerChat'
+            eventData = packet[9:] + ' (Command)'
 
         else:
             self.debug('Unhandled server message %s' % packet)
+            eventData = None
+            func = 'OnUnknownEvent'
         
         self.call_func(func, eventType, eventData)
+
 
             
     def call_func(self, func, eventType, eventData):
@@ -388,8 +410,6 @@ class AbstractParser(b3.parser.Parser):
 
         self.load_conf_max_say_line_length()
         self.load_config_message_delay()
-        #self.load_conf_big_b3_private_responses()
-        #self.load_conf_big_msg_duration()
 
         self.start_sayqueue_worker()
 
@@ -551,10 +571,9 @@ class AbstractParser(b3.parser.Parser):
         
 
     def OnPlayerLeave(self, action, data):
-        #player.onLeave: ['GunnDawg']
+        #Player #4 Kauldron disconnected
         client = self.getClient(data[0])
         if client: 
-            client.endMessageThreads = True
             client.disconnect() # this triggers the EVT_CLIENT_DISCONNECT event
         return None
 
@@ -625,6 +644,20 @@ class AbstractParser(b3.parser.Parser):
         """
         self._ban_list_from_server = data
         
+        
+    def OnBattleyeKick(self, action, data):
+        #'2 NZ (04b81a0bd914e7ba610ef3c0ffd66a1a) has been kicked by BattlEye: Script Restriction #107'
+        player, msg, reason = data.partition(') has been kicked by BattlEye: ')
+        cid = player.partition(' ')[0]
+        guid = player.rpartition('(')[2]
+        name = data[len(cid)+1:-len(guid)-len(reason)-33]
+        self.debug('Looking for client %s with GUID %s' % (name, guid))
+        client = self.getClient(name, guid=guid, auth=False)
+        if client: 
+            client.disconnect() # this triggers the EVT_CLIENT_DISCONNECT event
+        
+    def OnUnknownEvent(self, action, data):
+        return False
     ###############################################################################################
     #
     #    B3 Parser interface implementation
@@ -632,7 +665,7 @@ class AbstractParser(b3.parser.Parser):
     ###############################################################################################
 
 
-    def getClient(self, name, guid=None, cid=None, ip=None):
+    def getClient(self, name, guid=None, cid=None, ip=None, auth=True):
         """Get a connected client from storage or create it
         B3 CID   <--> cid
         B3 GUID  <--> guid
@@ -644,7 +677,7 @@ class AbstractParser(b3.parser.Parser):
         if not client:
             # try to get the client from the storage of already authed clients by name
             client = self.clients.getByName(name)
-        if not client:
+        if auth and not client:
             if cid == 'Server':
                 return self.clients.newClient('Server', guid='Server', name='Server', hide=True)
             if guid:
@@ -678,10 +711,17 @@ class AbstractParser(b3.parser.Parser):
         if self._player_list_from_server:
             self.debug('Got player list')
             self._previous_player_list_from_server = self._player_list_from_server
+            self._player_list_errors = 0
         else:
             self.debug("using previous player list")
+            self._player_list_errors += 1
             self._player_list_from_server = self._previous_player_list_from_server
         self._server_response_lock = False
+        
+        if self._player_list_errors > 5:
+            self._player_list_errors = 0
+            self.debug('Too many player list errors - shutting down connection')
+            self.close_battleye_connection()
         
         player_list = self._player_list_from_server.splitlines()
         self._player_list_from_server = ''
@@ -702,6 +742,8 @@ class AbstractParser(b3.parser.Parser):
                     self.debug('Player: %s' % pl)
                     pl['lobby'] = False
                     players[pl['cid']] = pl
+                else:
+                    self.debug('Not Matched: %s ' % player_list[i])
 
         self.debug('Players on server: %s' % players)
         return players
@@ -1056,7 +1098,14 @@ class AbstractParser(b3.parser.Parser):
                     'failed to read message_delay setting "%s" : %s' % (self.config.get(self.gameName, 'message_delay'), err))
         self.debug('message_delay: %s' % self._settings['message_delay'])
         
-
+        
+    def load_protocol_logging(self):
+        if self.config.has_option('b3', 'protocol_log'):
+            logfile = self.config.getpath('b3', 'protocol_log')
+            return logfile
+        else:
+            return None
+        
     def shutdown(self):
         """Shutdown B3"""
         try:
