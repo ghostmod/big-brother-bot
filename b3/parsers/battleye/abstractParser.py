@@ -17,13 +17,13 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #
 # CHANGELOG
-# 17/28/2012    0.1     Initial release
+# 17/28/2012    0.11     Initial release
 #  
 
 #
 
 __author__  = 'Courgette, 82ndab-Bravo17'
-__version__ = '0.1'
+__version__ = '0.11'
 
 
 import sys, re, traceback, time, string, Queue, threading, new
