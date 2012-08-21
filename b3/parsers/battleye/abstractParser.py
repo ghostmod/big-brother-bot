@@ -192,6 +192,9 @@ class AbstractParser(b3.parser.Parser):
                 sys.exit(self.exitcode)
 
     def setup_battleye_connection(self):
+        '''
+        Setup the Connection to the Battleye server
+        '''
         self.info('Connecting to battleye server  on %s:%s...' % (self._rconIp, self._rconPort))
         if self._serverConnection:
             self.close_battleye_connection()
@@ -273,6 +276,9 @@ class AbstractParser(b3.parser.Parser):
 
 
     def routeBattleyeMessagePacket(self, packet):
+        '''
+        Decide what to do with the packet received from the Battleye server
+        '''
         
         if packet is None:
             self.warning('cannot route empty packet : %s' % traceback.extract_tb(sys.exc_info()[2]))
@@ -287,7 +293,7 @@ class AbstractParser(b3.parser.Parser):
             if packet[-9:] == 'connected':
                 func ='OnPlayerConnected'
                 eventData = packet[8:len(packet)-10]
-            elif packet[-12] == 'disconnected':
+            elif packet[-12:] == 'disconnected':
                 func ='OnPlayerLeave'
                 eventData = packet[8:len(packet)-13]
             elif packet[-12:] == '(unverified)':
@@ -357,6 +363,9 @@ class AbstractParser(b3.parser.Parser):
 
         
     def routeBattleyeResponsePacket(self, packet):
+        '''
+        Join together packets to get the complete server response
+        '''
         self.debug('Responsepacket is %s' % packet)
         eventType = ''
         eventData = ''
@@ -526,17 +535,13 @@ class AbstractParser(b3.parser.Parser):
     
     def OnPlayerChat(self, action, data):
         """
-        player.onChat <source soldier name: string> <text: string> <target players: player subset>
-        
-        Effect: Player with name <source soldier name> (or the server, or the 
-            server admin) has sent chat message <text> to <target players>
-        
-        Comment: If <source soldier name> is "Server", then the message was sent 
-            from the server rather than from an actual player
+        #(Lobby) Bravo17: hello b3'
+        #(Global) Bravo17: global channel
+
+        Player has sent a message to other players
         """
         
-        #Bravo17: hello b3'
-        #Bravo17: global channel
+
         name, sep, message = data.partition(': ')
         name = name.strip()
         self.debug('Name = %s, Message = %s Name length = %s' % (name, message, len(name)))
@@ -571,14 +576,22 @@ class AbstractParser(b3.parser.Parser):
         
 
     def OnPlayerLeave(self, action, data):
+        """
         #Player #4 Kauldron disconnected
+        Player has left the server
+        """
+
         client = self.getClient(data[0])
         if client: 
             client.disconnect() # this triggers the EVT_CLIENT_DISCONNECT event
         return None
 
     def OnPlayerConnected(self, action, data):
-        # 0 Bravo17 (76.108.91.78:2304)
+        """
+        # Player #0 Bravo17 (76.108.91.78:2304)
+        Initial player connect message received
+        """
+
         data = data.rpartition(')')[0]
         data, sep, ip = data.rpartition('(')
         ip = ip.partition(':')[0]
@@ -588,12 +601,20 @@ class AbstractParser(b3.parser.Parser):
         return None
         
     def OnUnverifiedGUID(self, action, data):
-        # 0 Bravo17 - GUID: 80a5885ebe2420bab5e158a310fcbc7d
+        """
+        #Player #0 Bravo17 - GUID: 80a5885ebe2420bab5e158a310fcbc7d (unverified)
+        Players GUID has been found but not verified, no action to take
+        """
+
         return None
         
 
     def OnVerifiedGUID(self, action, data):
-        # 80a5885ebe2420bab5e158a310fcbc7d) of player #0 Bravo17
+        """
+        #Verified GUID  (80a5885ebe2420bab5e158a310fcbc7d) of player #0 Bravo17
+        Players GUID has been verified, auth player
+        """
+
         guid = data.partition(')')[0]
         data = data .partition('#')[2]
         cid, sep, name = data.partition(' ')
@@ -646,7 +667,11 @@ class AbstractParser(b3.parser.Parser):
         
         
     def OnBattleyeKick(self, action, data):
-        #'2 NZ (04b81a0bd914e7ba610ef3c0ffd66a1a) has been kicked by BattlEye: Script Restriction #107'
+        """
+        #Player #2 NZ (04b81a0bd914e7ba610ef3c0ffd66a1a) has been kicked by BattlEye: Script Restriction #107'
+        Player has been kicked by Battleye
+        """
+
         player, msg, reason = data.partition(') has been kicked by BattlEye: ')
         cid = player.partition(' ')[0]
         guid = player.rpartition('(')[2]
@@ -750,6 +775,9 @@ class AbstractParser(b3.parser.Parser):
 
 
     def authorizeClients(self):
+        """
+        Authorise clients from player list
+        """
         players = self.getPlayerList()
         self.verbose('authorizeClients() = %s' % players)
 
@@ -769,6 +797,9 @@ class AbstractParser(b3.parser.Parser):
 
 
     def sync(self):
+        """
+        Sync clients with player list
+        """
         plist = self.getPlayerList()
         mlist = {}
 
@@ -953,6 +984,9 @@ class AbstractParser(b3.parser.Parser):
         #'tempban': ('ban ', '%(cid)s', '%(duration)d', '%(reason)s'),
         #'tempbanByGUID': ('ban ', '%(guid)s', '%(duration)d', '%(reason)s'),
         duration = b3.functions.time2minutes(duration)
+        if duration < 1:
+            # Ban with length of zero will permban a player with Battleye, so do not activate the ban
+            return
 
         if admin:
             fullreason = self.getMessage('temp_banned_by', self.getMessageVariables(client=client, reason=reason, admin=admin, banduration=b3.functions.minutesStr(duration)))
@@ -965,7 +999,7 @@ class AbstractParser(b3.parser.Parser):
             if client.cid is None:
                 # ban by guid, this happens when we !tempban @xx a player that is not connected
                 try:
-                    self.write(self.getCommand('tempbanByGUID', guid=client.guid, duration=duration*60, reason=reason[:80]))
+                    self.write(self.getCommand('tempbanByGUID', guid=client.guid, duration=duration, reason=reason[:80]))
                     self.write(('writeBans',))
                 except CommandFailedError, err:
                     if admin:
@@ -974,7 +1008,7 @@ class AbstractParser(b3.parser.Parser):
                         self.error(err)
             else:
                 try:
-                    self.write(self.getCommand('tempban', cid=client.cid, duration=duration*60, reason=reason[:80]))
+                    self.write(self.getCommand('tempban', cid=client.cid, duration=duration, reason=reason[:80]))
                     self.write(('writeBans',))
                 except CommandFailedError, err:
                     if admin:
@@ -1051,7 +1085,8 @@ class AbstractParser(b3.parser.Parser):
 
 
     def getFullBanList(self):
-        """query the Battleye game server and return a BanlistContent object containing all bans stored on the game
+        """
+        query the Battleye game server and return a BanlistContent object containing all bans stored on the game
         server memory.
         """
         response = BanlistContent()
@@ -1100,6 +1135,9 @@ class AbstractParser(b3.parser.Parser):
         
         
     def load_protocol_logging(self):
+        """
+        Allow extra logging from protocol.py to be activaed
+        """
         if self.config.has_option('b3', 'protocol_log'):
             logfile = self.config.getpath('b3', 'protocol_log')
             return logfile
@@ -1126,7 +1164,7 @@ class AbstractParser(b3.parser.Parser):
 
             
     def restart(self):
-        """Stop B3 with the restart exit statis (221)"""
+        """Stop B3 with the restart exit status (221)"""
         self.shutdown()
 
         time.sleep(5)
