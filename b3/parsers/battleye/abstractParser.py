@@ -570,6 +570,12 @@ class AbstractParser(b3.parser.Parser):
                 text = text[1:]
             elif cmd_name in admin_plugin._commands:
                 text = cmdPrefix + text[1:]
+            
+        if len(text) >= 2:
+            cmd_name = text[1:].split(' ', 1)[0]
+            if cmd_name in admin_plugin._commands:
+                # Remove chat source from end of line
+                text = text.rpartition(' ')[0]
 
         event_type = b3.events.EVT_CLIENT_SAY
         return b3.events.Event(event_type, text, client)
