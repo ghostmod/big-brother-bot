@@ -378,7 +378,7 @@ class AbstractParser(b3.parser.Parser):
             self._multi_packet_response[this_packet] = packet[3:]
             if this_packet == total_packets - 1:
                 packet = ''
-                for p in range(0, total_packets-1):
+                for p in range(0, total_packets):
                     if len(self._multi_packet_response[p]):
                         packet = packet + self._multi_packet_response[p]
                     else:
