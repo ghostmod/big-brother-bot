@@ -196,7 +196,8 @@ class BattleyeServer(threading.Thread):
         self.say_queue.append(cmd)
 
     def compute_crc(self, data):
-        crc = binascii.crc32(data) & 0xffffffff
+        buf = buffer(data)
+        crc = binascii.crc32(buf) & 0xffffffff
         crc32 = '0x%08x' % crc
         # self.getLogger().debug("crc32 = %s" % crc)
         return int(crc32[8:10], 16), int(crc32[6:8], 16), int(crc32[4:6], 16), int(crc32[2:4], 16)
