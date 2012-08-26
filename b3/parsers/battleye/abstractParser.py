@@ -93,6 +93,7 @@ class AbstractParser(b3.parser.Parser):
     _server_response_lock = False
     _server_response_timeout = 5
     _player_list_errors = 0
+    _process_delay = 0.05
     _regPlayer = re.compile(r'^(?P<cid>[0-9]+)\s+(?P<ip>[0-9.]+):(?P<port>[0-9]+)\s+(?P<ping>[0-9-]+)\s+(?P<guid>[0-9a-f]+)\((?P<verified>[A-Z]+)\)\s+(?P<name>.*?)$', re.I)
     _regPlayer_lobby = re.compile(r'^(?P<cid>[0-9]+)\s+(?P<ip>[0-9.]+):(?P<port>[0-9]+)\s+(?P<ping>[0-9-]+)\s+(?P<guid>[0-9a-f]+)\((?P<verified>[A-Z]+)\)\s+(?P<name>.*?)(?P<lobby>\(Lobby\))$', re.I)
     
@@ -166,6 +167,8 @@ class AbstractParser(b3.parser.Parser):
                 self.error(e)
                 # unexpected exception, better close the battleye connection
                 self.close_battleye_connection()
+
+            time.sleep(self._process_delay)
 
         #self._serverConnection.stop()
         self.close_battleye_connection()

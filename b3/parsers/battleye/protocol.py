@@ -6,7 +6,6 @@ __version__ = '1.0.1'
 
 import logging
 import time
-import asyncore
 import socket
 import threading
 import binascii
@@ -44,7 +43,7 @@ class BattleyeServer(threading.Thread):
         self.server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.server.connect((host, port))
         self.password = password
-        self.read_queue = deque([])
+        self.read_queue = Queue.Queue([])
         self.write_queue = deque([])
         self.say_queue = deque([])
         self.command_queue = deque([])
@@ -56,7 +55,9 @@ class BattleyeServer(threading.Thread):
         self.server_thread = threading.Thread(target=self.polling_thread)
         self.server_thread.setDaemon(True)
         self.server_thread.start()
-        self.getLogger().debug("Battleye server thread")        
+        self.getLogger().debug("Battleye server thread")
+        self._polling_delay = 0.05
+        self._process_delay = 0.05
         
         self.start()
         time.sleep(1.5)
@@ -77,7 +78,7 @@ class BattleyeServer(threading.Thread):
                 if readable:
                     try:
                         data, addr = server.recvfrom(8192)
-                        self.read_queue.append(data)
+                        self.read_queue.put(data)
                         self.getLogger().debug("Read data: %s" % repr(data))
                     except socket.error, (value,message): 
                         self.getLogger().debug("Socket error %s %s" % (value, message))
@@ -97,6 +98,8 @@ class BattleyeServer(threading.Thread):
                                 seq = ord(data[8:9])
                                 self.getLogger().debug("Sent sequence was %s" % seq)
                                 self.sent_data_seq.append(seq)
+
+                time.sleep(self._polling_delay)
                         
             else:
                 self._isrunning = False
@@ -113,8 +116,8 @@ class BattleyeServer(threading.Thread):
         write_seq = 0
         last_write_time = time.time()
         while self._isconnected and not self.isStopped():
-            if len(self.read_queue):
-                packet = self.read_queue.popleft()
+            try:
+                packet = self.read_queue.get(timeout = 0.5)
                 type, sequence, data = self.decode_server_packet(packet)
                 if type == 2:
                     # Acknowledge server message receipt
@@ -135,15 +138,11 @@ class BattleyeServer(threading.Thread):
                 elif type == 255:
                     #CRC Error
                     crc_error_count += 1
+                
+            except Queue.Empty:
+                pass
                         
-            if len(self.command_queue):
-                request = self.encode_packet(1, write_seq, self.command_queue.popleft())
-                self.write_queue.append(request)
-                last_write_time = time.time()
-                write_seq += 1
-                if write_seq > 255:
-                    write_seq -= 256
-            elif len(self.say_queue):
+            if len(self.say_queue):
                 request = self.encode_packet(1, write_seq, self.say_queue.popleft())
                 self.write_queue.append(request)
                 last_write_time = time.time()
@@ -162,6 +161,8 @@ class BattleyeServer(threading.Thread):
                 self.getLogger().debug('CRC Errors %s   Commands not replied to %s' % (crc_error_count, self.sent_data_seq))
                 # 10 + consecutive crc errors or 10 commands not replied to
                 self.stop()
+
+            #time.sleep(self._process_delay)
                 
         self.getLogger().debug("Ending Server Thread")
                     
@@ -175,14 +176,16 @@ class BattleyeServer(threading.Thread):
         login_response = False
         t = time.time()
         while time.time() < t+3 and not login_response:
-            if len(self.read_queue):
-                packet = self.read_queue.popleft()
+            try:
+                packet = self.read_queue.get(timeout = 0.1)
                 type, logged_in, data =  self.decode_server_packet(packet)
                 self.getLogger().debug("login response was %s %s %s" % (type, logged_in, data))
                 if type == chr(255):
                     self.getLogger().debug('Invalid packet')
                 elif type == 0:
                     login_response = True
+            except Queue.Empty:
+                pass
 
         if login_response:
             if logged_in == 1:
