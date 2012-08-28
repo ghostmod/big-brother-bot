@@ -45,19 +45,18 @@ class BattleyeServer(threading.Thread):
         self.password = password
         self.read_queue = Queue.Queue([])
         self.write_queue = deque([])
-        self.say_queue = deque([])
-        self.command_queue = deque([])
+        self.say_queue = Queue.Queue([])
         self.server_response_queue = deque ([])
         self.server_message_queue = deque ([])
         self.sent_data_seq = []
         self.observers = set()
+        self._polling_delay = 0.05
         self._stopEvent = threading.Event()
         self.server_thread = threading.Thread(target=self.polling_thread)
         self.server_thread.setDaemon(True)
         self.server_thread.start()
         self.getLogger().debug("Battleye server thread")
-        self._polling_delay = 0.05
-        self._process_delay = 0.05
+
         
         self.start()
         time.sleep(1.5)
@@ -106,24 +105,46 @@ class BattleyeServer(threading.Thread):
             
         self.getLogger().debug("Ending Polling Thread")
         self.stop()
-
+        
+        
     def run(self):
         request = bytearray()
         packet = bytearray()
-        crc_error_count = 0
+        self.crc_error_count = 0
         self.getLogger().debug("Start Listening")
         self._isconnected = self.login()
-        write_seq = 0
-        last_write_time = time.time()
+
+        if self._isconnected:
+            self.read_thread = threading.Thread(target=self.reading_thread)
+            self.read_thread.setDaemon(True)
+            self.read_thread.start()
+            self.write_thread = threading.Thread(target=self.writing_thread)
+            self.write_thread.setDaemon(True)
+            self.write_thread.start()
+        while self._isconnected and not self.isStopped():
+            if self.crc_error_count > 10 or len(self.sent_data_seq) > 10:
+                self.getLogger().debug('CRC Errors %s   Commands not replied to %s' % (self.crc_error_count, self.sent_data_seq))
+                # 10 + consecutive crc errors or 10 commands not replied to
+                self.stop()
+                
+            time.sleep(10)
+
+            #time.sleep(self._process_delay)
+                
+        self.getLogger().debug("Ending Server Thread")
+        
+        
+    def reading_thread(self):
+        self.getLogger().debug("Starting Reading Thread")
         while self._isconnected and not self.isStopped():
             try:
-                packet = self.read_queue.get(timeout = 0.5)
+                packet = self.read_queue.get(timeout = 2)
                 type, sequence, data = self.decode_server_packet(packet)
                 if type == 2:
                     # Acknowledge server message receipt
-                    request = self.encode_packet(2, sequence, None)
+                    packet = self.encode_packet(2, sequence, None)
                     self.getLogger().debug("Server Message sequence was %s" % sequence)
-                    self.write_queue.append(request)
+                    self.write_queue.append(packet)
                     last_write_time = time.time()
                     self._on_event( (2, data) )
                 elif type == 1:
@@ -137,34 +158,38 @@ class BattleyeServer(threading.Thread):
                         self._on_event( (1, data) )
                 elif type == 255:
                     #CRC Error
-                    crc_error_count += 1
+                    self.crc_error_count += 1
                 
             except Queue.Empty:
                 pass
-                        
-            if len(self.say_queue):
-                request = self.encode_packet(1, write_seq, self.say_queue.popleft())
-                self.write_queue.append(request)
+                
+        self.getLogger().debug("Ending Reading Thread")
+                
+    def writing_thread(self):
+        self.getLogger().debug("Starting Writing Thread")
+        write_seq = 0
+        last_write_time = time.time()
+        while self._isconnected and not self.isStopped():
+            try:
+                request = self.say_queue.get(timeout = 2)
+                packet = self.encode_packet(1, write_seq, request)
                 last_write_time = time.time()
-                write_seq += 1
-                if write_seq > 255:
-                    write_seq -= 256
-            elif last_write_time + 30 < time.time():
-                request =  self.encode_packet(1, write_seq, None)
-                self.write_queue.append(request)
-                last_write_time = time.time()
+                self.write_queue.append(packet)
                 write_seq += 1
                 if write_seq > 255:
                     write_seq -= 256
                 
-            if crc_error_count > 10 or len(self.sent_data_seq) > 10:
-                self.getLogger().debug('CRC Errors %s   Commands not replied to %s' % (crc_error_count, self.sent_data_seq))
-                # 10 + consecutive crc errors or 10 commands not replied to
-                self.stop()
+            except Queue.Empty:
+                if last_write_time + 30 < time.time():
+                    last_write_time = time.time()
+                    packet =  self.encode_packet(1, write_seq, None)
+                    self.write_queue.append(packet)
+                    write_seq += 1
+                    if write_seq > 255:
+                        write_seq -= 256
+                
+        self.getLogger().debug("Ending Writing Thread")
 
-            #time.sleep(self._process_delay)
-                
-        self.getLogger().debug("Ending Server Thread")
                     
     def login(self):
         """authenticate on the Battleye server with given password"""
@@ -196,7 +221,7 @@ class BattleyeServer(threading.Thread):
             return False
 
     def command(self, cmd):
-        self.say_queue.append(cmd)
+        self.say_queue.put(cmd)
 
     def compute_crc(self, data):
         buf = buffer(data)

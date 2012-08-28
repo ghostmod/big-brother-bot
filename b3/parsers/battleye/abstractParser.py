@@ -105,8 +105,6 @@ class AbstractParser(b3.parser.Parser):
 
     def run(self):
         """Main worker thread for B3"""
-        for t in threading.enumerate():
-            self.debug('Still running %s', t.getName())
         self.bot('Start listening ...')
         self.screen.write('Startup Complete : B3 is running! Let\'s get to work!\n\n')
         self.screen.write('(If you run into problems, check %s for detailed log info)\n' % self.config.getpath('b3', 'logfile'))
@@ -235,10 +233,10 @@ class AbstractParser(b3.parser.Parser):
 
 
     def close_battleye_connection(self):
-        #try:
-        self._serverConnection.stop()
-        #except Exception:
-        #    pass
+        try:
+            self._serverConnection.stop()
+        except Exception:
+            pass
         self._serverConnection = None
         time.sleep(5)
 
