@@ -17,13 +17,13 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #
 # CHANGELOG
-# 17/28/2012    0.11     Initial release
+# 17/28/2012    0.12     Initial release
 #  
 
 #
 
 __author__  = 'Courgette, 82ndab-Bravo17'
-__version__ = '0.11'
+__version__ = '0.12'
 
 
 import sys, re, traceback, time, string, Queue, threading, new
@@ -290,14 +290,14 @@ class AbstractParser(b3.parser.Parser):
         if packet.startswith('RCon admin #'):
             func = 'OnServerMessage'
             eventData = packet[12:]
-        elif packet[0:8] == 'Player #':
-            if packet[-9:] == 'connected':
+        elif packet.startswith('Player #'):
+            if packet.endswith('connected'):
                 func ='OnPlayerConnected'
                 eventData = packet[8:len(packet)-10]
-            elif packet[-12:] == 'disconnected':
+            elif packet.endswith('disconnected'):
                 func ='OnPlayerLeave'
                 eventData = packet[8:len(packet)-13]
-            elif packet[-12:] == '(unverified)':
+            elif packet.endswith('(unverified)'):
                 func = 'OnUnverifiedGUID'
                 eventData = packet[8:len(packet)-13]
             elif packet.find(' has been kicked by BattlEye: '):
@@ -307,28 +307,28 @@ class AbstractParser(b3.parser.Parser):
                 self.debug('Unhandled server message %s' % packet)
                 eventData = None
                 func = 'OnUnknownEvent'
-        elif packet[0:13] == 'Verified GUID':
+        elif packet.startswith('Verified GUID'):
             func = 'OnVerifiedGUID'
             eventData = (packet[15:])
-        elif packet[0:7] == '(Lobby)':
+        elif packet.startswith('(Lobby)'):
             func = 'OnPlayerChat'
             eventData = packet[7:] + ' (Lobby)'
-        elif packet[0:8] == '(Global)':
+        elif packet.startswith('(Global)'):
             func = 'OnPlayerChat'
             eventData = packet[8:] + ' (Global)'
-        elif packet[0:8] == '(Direct)':
+        elif packet.startwith('(Direct)'):
             func = 'OnPlayerChat'
             eventData = packet[8:] + ' (Direct)'
-        elif packet[0:9] == '(Vehicle)':
+        elif packet.startswith('(Vehicle)'):
             func = 'OnPlayerChat'
             eventData = packet[9:] + ' (Vehicle)'
-        elif packet[0:7] == '(Group)':
+        elif packet.startswith('(Group)'):
             func = 'OnPlayerChat'
             eventData = packet[7:] + ' (Group)'
-        elif packet[0:6] == '(Side)':
+        elif packet.startswith('(Side)'):
             func = 'OnPlayerChat'
             eventData = packet[6:] + ' (Side)'
-        elif packet[0:9] == '(Command)':
+        elif packet.startswith('(Command)'):
             func = 'OnPlayerChat'
             eventData = packet[9:] + ' (Command)'
 

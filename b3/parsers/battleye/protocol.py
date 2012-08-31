@@ -1,8 +1,7 @@
 # Changelog
-# 2010/07/23 - xlr8or - v1.0.1
-# * fixed infinite loop in a python socket thread in receivePacket() on gameserver restart
 
-__version__ = '1.0.1'
+
+__version__ = '1.0.2'
 
 import logging
 import time
