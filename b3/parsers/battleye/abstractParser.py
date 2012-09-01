@@ -316,7 +316,7 @@ class AbstractParser(b3.parser.Parser):
         elif packet.startswith('(Global)'):
             func = 'OnPlayerChat'
             eventData = packet[8:] + ' (Global)'
-        elif packet.startwith('(Direct)'):
+        elif packet.startswith('(Direct)'):
             func = 'OnPlayerChat'
             eventData = packet[8:] + ' (Direct)'
         elif packet.startswith('(Vehicle)'):
