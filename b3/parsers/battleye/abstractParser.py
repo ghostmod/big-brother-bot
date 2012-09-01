@@ -17,13 +17,14 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #
 # CHANGELOG
-# 17/28/2012    0.12     Initial release
-#  
+# 17/28/2012    0.1     Initial release
+# 08/31/2012    0.12    Various fixes and cleanups
+# 09/01/2012    0.13    Check for non-verified GUIDs in Player List from server
 
 #
 
 __author__  = 'Courgette, 82ndab-Bravo17'
-__version__ = '0.12'
+__version__ = '0.13'
 
 
 import sys, re, traceback, time, string, Queue, threading, new
@@ -94,8 +95,8 @@ class AbstractParser(b3.parser.Parser):
     _server_response_timeout = 5
     _player_list_errors = 0
     _process_delay = 0.05
-    _regPlayer = re.compile(r'^(?P<cid>[0-9]+)\s+(?P<ip>[0-9.]+):(?P<port>[0-9]+)\s+(?P<ping>[0-9-]+)\s+(?P<guid>[0-9a-f]+)\((?P<verified>[A-Z]+)\)\s+(?P<name>.*?)$', re.I)
-    _regPlayer_lobby = re.compile(r'^(?P<cid>[0-9]+)\s+(?P<ip>[0-9.]+):(?P<port>[0-9]+)\s+(?P<ping>[0-9-]+)\s+(?P<guid>[0-9a-f]+)\((?P<verified>[A-Z]+)\)\s+(?P<name>.*?)(?P<lobby>\(Lobby\))$', re.I)
+    _regPlayer = re.compile(r'^(?P<cid>[0-9]+)\s+(?P<ip>[0-9.]+):(?P<port>[0-9]+)\s+(?P<ping>[0-9-]+)\s+(?P<guid>[0-9a-f]+)\((?P<verified>[A-Z\?]+)\)\s+(?P<name>.*?)$', re.I)
+    _regPlayer_lobby = re.compile(r'^(?P<cid>[0-9]+)\s+(?P<ip>[0-9.]+):(?P<port>[0-9]+)\s+(?P<ping>[0-9-]+)\s+(?P<guid>[0-9a-f]+)\((?P<verified>[A-Z\?]+)\)\s+(?P<name>.*?)(?P<lobby>\(Lobby\))$', re.I)
     
     # if ban_with_server is True, then the Battleye server will be used for ban
     ban_with_server = True
@@ -764,16 +765,26 @@ class AbstractParser(b3.parser.Parser):
             p = re.match(self._regPlayer_lobby, player_list[i])
             if p:
                 pl = p.groupdict()
-                self.debug('Player: %s' % pl)
-                pl['lobby'] = True
-                players[pl['cid']] = pl
+                if pl['verified'] =='OK':
+                    self.debug('Player: %s' % pl)
+                    pl['lobby'] = True
+                    players[pl['cid']] = pl
+                elif pl['verified'] =='?':
+                        self.debug('Player in Lobby GUID not yet verified: %s' % pl)
+                else:
+                        self.debug('Player in Lobby GUID status unknown: %s' % pl)
             else:
                 p = re.match(self._regPlayer, player_list[i])
                 if p:
                     pl = p.groupdict()
-                    self.debug('Player: %s' % pl)
-                    pl['lobby'] = False
-                    players[pl['cid']] = pl
+                    if pl['verified'] =='OK':
+                        self.debug('Player: %s' % pl)
+                        pl['lobby'] = False
+                        players[pl['cid']] = pl
+                    elif pl['verified'] =='?':
+                        self.debug('Player GUID not yet verified: %s' % pl)
+                    else:
+                        self.debug('Player GUID status unknown: %s' % pl)
                 else:
                     self.debug('Not Matched: %s ' % player_list[i])
 
@@ -1179,3 +1190,4 @@ class AbstractParser(b3.parser.Parser):
         self.bot('Restarting...')
         self.exitcode = 221
         sys.exit(221)
+
