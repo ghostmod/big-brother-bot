@@ -20,11 +20,12 @@
 # 17/28/2012    0.1     Initial release
 # 08/31/2012    0.12    Various fixes and cleanups
 # 09/01/2012    0.13    Check for non-verified GUIDs in Player List from server
+# 09/01/2012    0.14    Allow for non-ascii names by replacing clients.Client.auth method
 
 #
 
 __author__  = 'Courgette, 82ndab-Bravo17'
-__version__ = '0.13'
+__version__ = '0.14'
 
 
 import sys, re, traceback, time, string, Queue, threading, new
@@ -1191,3 +1192,69 @@ class AbstractParser(b3.parser.Parser):
         self.exitcode = 221
         sys.exit(221)
 
+#############################################################
+# Below is the code that changes a bit the b3.clients.Client
+# class at runtime. What the point of coding in python if we
+# cannot play with its dynamic nature ;)
+#
+# why ?
+# because doing so make sure we're not broking any other 
+# working and long tested parser. The changes we make here
+# are only applied when the battleye parser is loaded.
+#############################################################
+  
+## change the auth method in the Client class
+
+def battleyeClientAuthMethod(self):
+    if not self.authed and self.guid and not self.authorizing:
+        self.authorizing = True
+
+        name = self.name
+        ip = self.ip
+        try:
+            inStorage = self.console.storage.getClient(self)
+        except KeyError, msg:
+            self.console.debug('User not found %s: %s', self.guid, msg)
+            inStorage = False
+        except Exception, e:
+            self.console.error('auth self.console.storage.getClient(client) - %s\n%s', e, traceback.extract_tb(sys.exc_info()[2]))
+            self.authorizing = False
+            return False
+
+        #lastVisit = None
+        if inStorage:
+            self.console.bot('Client found in storage %s, welcome back %s', str(self.id), self.name)
+            self.lastVisit = self.timeEdit
+        else:
+            self.console.bot('Client not found in the storage %s, create new', str(self.guid))
+
+        self.connections = int(self.connections) + 1
+        self.name = name
+        self.ip = ip
+        self.save()
+        self.authed = True
+
+        # Allow for non-ascii names
+        self.console.debug('Client Authorized: [%s] %r - %s', self.cid, self.name, self.guid)
+
+        # check for bans
+        if self.numBans > 0:
+            ban = self.lastBan
+            if ban:
+                self.reBan(ban)
+                self.authorizing = False
+                return False
+
+        self.refreshLevel()
+
+        self.console.queueEvent(b3.events.Event(b3.events.EVT_CLIENT_AUTH,
+            self,
+            self))
+
+        self.authorizing = False
+
+        return self.authed
+    else:
+        return False
+        
+b3.clients.Client.auth = battleyeClientAuthMethod
