@@ -18,6 +18,7 @@
 #
 import unittest2 as unittest
 from mock import Mock, patch
+from b3.fake import FakeClient
 from b3.parsers.arma2 import Arma2Parser
 from b3.config import XmlConfigParser
 
@@ -115,4 +116,15 @@ class Test_game_events_parsing(Arma2TestCase):
         bravo17 = first_event.client
         # THEN there should be a EVT_CLIENT_AUTH event
         self.assert_has_event("EVT_CLIENT_AUTH", data=bravo17, client=bravo17)
+
+
+    def test_player_disconnect(self):
+        # GIVEN
+        bravo17 = FakeClient(self.parser, name="Bravo17", guid="80a5885ebe2420bab5e158a310fcbc7d")
+        bravo17.connects("12")
+        self.clear_events()
+        # WHEN
+        self.parser.routeBattleyeMessagePacket("""Player #12 Bravo17 disconnected""")
+        # THEN
+        self.assert_has_event("EVT_CLIENT_DISCONNECT", client=bravo17, data='12')
 

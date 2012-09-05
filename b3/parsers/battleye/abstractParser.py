@@ -293,12 +293,12 @@ class AbstractParser(b3.parser.Parser):
             func = 'OnServerMessage'
             eventData = packet[12:]
         elif packet.startswith('Player #'):
-            if packet.endswith('connected'):
-                func ='OnPlayerConnected'
-                eventData = packet[8:len(packet)-10]
-            elif packet.endswith('disconnected'):
+            if packet.endswith('disconnected'):
                 func ='OnPlayerLeave'
                 eventData = packet[8:len(packet)-13]
+            elif packet.endswith('connected'):
+                func ='OnPlayerConnected'
+                eventData = packet[8:len(packet)-10]
             elif packet.endswith('(unverified)'):
                 func = 'OnUnverifiedGUID'
                 eventData = packet[8:len(packet)-13]
@@ -589,8 +589,8 @@ class AbstractParser(b3.parser.Parser):
         #Player #4 Kauldron disconnected
         Player has left the server
         """
-
-        client = self.getClient(data[0])
+        parts = data.split(' ', 1)
+        client = self.getClient(name=parts[1], cid=parts[0])
         if client: 
             client.disconnect() # this triggers the EVT_CLIENT_DISCONNECT event
         return None
