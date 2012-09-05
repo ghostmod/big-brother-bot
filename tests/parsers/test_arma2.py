@@ -128,3 +128,80 @@ class Test_game_events_parsing(Arma2TestCase):
         # THEN
         self.assert_has_event("EVT_CLIENT_DISCONNECT", client=bravo17, data='12')
 
+
+    def test_Lobby_chat(self):
+        # GIVEN
+        bravo17 = FakeClient(self.parser, name="Bravo17", guid="80a5885ebe2420bab5e158a310fcbc7d")
+        bravo17.connects("12")
+        self.clear_events()
+        # WHEN
+        self.parser.routeBattleyeMessagePacket("""(Lobby) Bravo17: hello b3""")
+        # THEN
+        self.assert_has_event("EVT_CLIENT_SAY", client=bravo17, data='hello b3 (Lobby)')
+
+
+    def test_Global_chat(self):
+        # GIVEN
+        bravo17 = FakeClient(self.parser, name="Bravo17", guid="80a5885ebe2420bab5e158a310fcbc7d")
+        bravo17.connects("12")
+        self.clear_events()
+        # WHEN
+        self.parser.routeBattleyeMessagePacket("""(Global) Bravo17: global channel""")
+        # THEN
+        self.assert_has_event("EVT_CLIENT_SAY", client=bravo17, data='global channel (Global)')
+
+
+    def test_Direct_chat(self):
+        # GIVEN
+        bravo17 = FakeClient(self.parser, name="Bravo17", guid="80a5885ebe2420bab5e158a310fcbc7d")
+        bravo17.connects("12")
+        self.clear_events()
+        # WHEN
+        self.parser.routeBattleyeMessagePacket("""(Direct) Bravo17: test direct channel""")
+        # THEN
+        self.assert_has_event("EVT_CLIENT_SAY", client=bravo17, data='test direct channel (Direct)')
+
+
+    def test_Vehicule_chat(self):
+        # GIVEN
+        bravo17 = FakeClient(self.parser, name="Bravo17", guid="80a5885ebe2420bab5e158a310fcbc7d")
+        bravo17.connects("12")
+        self.clear_events()
+        # WHEN
+        self.parser.routeBattleyeMessagePacket("""(Vehicle) Bravo17: test vehicle channel""")
+        # THEN
+        self.assert_has_event("EVT_CLIENT_SAY", client=bravo17, data='test vehicle channel (Vehicle)')
+
+
+    def test_Group_chat(self):
+        # GIVEN
+        bravo17 = FakeClient(self.parser, name="Bravo17", guid="80a5885ebe2420bab5e158a310fcbc7d")
+        bravo17.connects("12")
+        self.clear_events()
+        # WHEN
+        self.parser.routeBattleyeMessagePacket("""(Group) Bravo17: test group channel""")
+        # THEN
+        self.assert_has_event("EVT_CLIENT_SAY", client=bravo17, data='test group channel (Group)')
+
+
+    def test_Side_chat(self):
+        # GIVEN
+        bravo17 = FakeClient(self.parser, name="Bravo17", guid="80a5885ebe2420bab5e158a310fcbc7d")
+        bravo17.connects("12")
+        self.clear_events()
+        # WHEN
+        self.parser.routeBattleyeMessagePacket("""(Side) Bravo17: test side channel""")
+        # THEN
+        self.assert_has_event("EVT_CLIENT_SAY", client=bravo17, data='test side channel (Side)')
+
+
+    def test_Command_chat(self):
+        # GIVEN
+        bravo17 = FakeClient(self.parser, name="Bravo17", guid="80a5885ebe2420bab5e158a310fcbc7d")
+        bravo17.connects("12")
+        self.clear_events()
+        # WHEN
+        self.parser.routeBattleyeMessagePacket("""(Command) Bravo17: test command channel""")
+        # THEN
+        self.assert_has_event("EVT_CLIENT_SAY", client=bravo17, data='test command channel (Command)')
+
