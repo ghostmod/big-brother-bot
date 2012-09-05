@@ -100,21 +100,43 @@ class Test_game_events_parsing(Arma2TestCase):
 
     ################################################################################################################
 
-    def test_player_auth(self):
+    def test_player_connected(self):
         # GIVEN
         self.clear_events()
         # WHEN
         self.parser.routeBattleyeMessagePacket("""Player #0 Bravo17 (76.108.91.78:2304) connected""")
+        # THEN
+        self.assertEqual(1, len(self.evt_queue))
+        event = self.evt_queue[0]
+        self.assertEqual(self.parser.getEventID("EVT_CLIENT_CONNECT"), event.type)
+        self.assertEqual("Bravo17", event.client.name)
+        self.assertEqual("0", event.client.cid)
+        self.assertEqual("76.108.91.78", event.client.ip)
+
+
+    def test_Verified_guid__with_connected_player(self):
+        # GIVEN
+        bravo17 = FakeClient(self.parser, name="Bravo17")
+        bravo17.connects("0")
+        self.clear_events()
+        # WHEN
         self.parser.routeBattleyeMessagePacket("""Verified GUID (80a5885ebe2420bab5e158a310fcbc7d) of player #0 Bravo17""")
-        # THEN 1st event should be EVT_CLIENT_CONNECT
-        self.assertGreater(len(self.evt_queue), 0)
-        first_event = self.evt_queue[0]
-        self.assertEqual(self.parser.getEventID("EVT_CLIENT_CONNECT"), first_event.type)
-        self.assertEqual("Bravo17", first_event.client.name)
-        self.assertEqual("80a5885ebe2420bab5e158a310fcbc7d", first_event.client.guid)
-        self.assertEqual("0", first_event.client.cid)
-        bravo17 = first_event.client
-        # THEN there should be a EVT_CLIENT_AUTH event
+        # THEN
+        self.assert_has_event("EVT_CLIENT_AUTH", data=bravo17, client=bravo17)
+
+
+    def test_Verified_guid__with_unknonw_player(self):
+        # GIVEN
+        self.clear_events()
+        # WHEN
+        self.parser.routeBattleyeMessagePacket("""Verified GUID (80a5885ebe2420bab5e158a310fcbc7d) of player #0 Bravo17""")
+        # THEN
+        self.assertTrue(len(self.evt_queue))
+        event = self.evt_queue[0]
+        self.assertEqual(self.parser.getEventID("EVT_CLIENT_CONNECT"), event.type)
+        self.assertEqual("Bravo17", event.client.name)
+        self.assertEqual("0", event.client.cid)
+        bravo17 = event.client
         self.assert_has_event("EVT_CLIENT_AUTH", data=bravo17, client=bravo17)
 
 
