@@ -34,7 +34,13 @@ from b3.parsers.battleye.rcon import Rcon as BattleyeRcon
 from b3.parsers.battleye.protocol import BattleyeServer, CommandFailedError, CommandError, NetworkError
 import b3.events
 import b3.cvar
+from b3.clients import Clients
 from b3.functions import getStuffSoundingLike
+
+
+
+# disable the authorizing timer that come by default with the b3.clients.Clients class
+Clients.authorizeClients = lambda *args, **kwargs: None
 
 
 # how long should the bot try to connect to the Battleye server before giving out (in second)
@@ -293,12 +299,12 @@ class AbstractParser(b3.parser.Parser):
             func = 'OnServerMessage'
             eventData = packet[12:]
         elif packet.startswith('Player #'):
-            if packet.endswith('connected'):
-                func ='OnPlayerConnected'
-                eventData = packet[8:len(packet)-10]
-            elif packet.endswith('disconnected'):
+            if packet.endswith(' disconnected'):
                 func ='OnPlayerLeave'
                 eventData = packet[8:len(packet)-13]
+            elif packet.endswith(' connected'):
+                func ='OnPlayerConnected'
+                eventData = packet[8:len(packet)-10]
             elif packet.endswith('(unverified)'):
                 func = 'OnUnverifiedGUID'
                 eventData = packet[8:len(packet)-13]
@@ -414,7 +420,7 @@ class AbstractParser(b3.parser.Parser):
         
 
     def startup(self):
-       
+
         # add specific events
         self.Events.createEvent('EVT_GAMESERVER_CONNECT', 'connected to game server')
         self.Events.createEvent('EVT_CLIENT_SPAWN', 'Client Spawn')
@@ -589,8 +595,8 @@ class AbstractParser(b3.parser.Parser):
         #Player #4 Kauldron disconnected
         Player has left the server
         """
-
-        client = self.getClient(data[0])
+        parts = data.split(' ', 1)
+        client = self.getClient(name=parts[1], cid=parts[0])
         if client: 
             client.disconnect() # this triggers the EVT_CLIENT_DISCONNECT event
         return None
@@ -605,10 +611,10 @@ class AbstractParser(b3.parser.Parser):
         data, sep, ip = data.rpartition('(')
         ip = ip.partition(':')[0]
         cid, sep, name = data.partition(' ')
-        name = name.strip() 
-        self._client_auth_waiting['cid']=  (ip, name)
-        return None
-        
+        name = name.strip()
+        self.clients.newClient(cid, name=name, ip=ip) # fires EVT_CLIENT_CONNECTED
+
+
     def OnUnverifiedGUID(self, action, data):
         """
         #Player #0 Bravo17 - GUID: 80a5885ebe2420bab5e158a310fcbc7d (unverified)
@@ -628,26 +634,17 @@ class AbstractParser(b3.parser.Parser):
         data = data .partition('#')[2]
         cid, sep, name = data.partition(' ')
         name = name.strip()
-        ip = ''
-        try:
-            if self._client_auth_waiting['cid'][1] == name:
-                ip = self._client_auth_waiting['cid'][0]
-        except KeyError:
-            pass
-            
-        client = self.clients.getByGUID(guid)
-        if not client:
-            self.debug('adding client')
-            client = self.clients.newClient(cid, guid=guid, name=name, ip=ip)
-            self.debug(client)
+
+        client = self.getClient(name=name, cid=cid, guid=guid)
+        if client:
             # update client data
+            client.guid = guid
             client.name = name
             client.cid = cid
-            if ip != '':
-                client.ip = ip
-            self.queueEvent(b3.events.Event(b3.events.EVT_CLIENT_JOIN, None, client))
-                
-        return None
+            # make sure client is now authenticated as we know its guid
+            client.auth()
+        else:
+            self.warning("could not create client")
 
     def OnServerMessage(self, action, data):
         """
@@ -699,7 +696,7 @@ class AbstractParser(b3.parser.Parser):
     ###############################################################################################
 
 
-    def getClient(self, name, guid=None, cid=None, ip=None, auth=True):
+    def getClient(self, name, guid=None, cid=None, ip='', auth=True):
         """Get a connected client from storage or create it
         B3 CID   <--> cid
         B3 GUID  <--> guid
