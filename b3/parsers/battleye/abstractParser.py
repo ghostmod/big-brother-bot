@@ -21,11 +21,13 @@
 # 08/31/2012    0.12    Various fixes and cleanups
 # 09/01/2012    0.13    Check for non-verified GUIDs in Player List from server
 # 09/01/2012    0.14    Allow for non-ascii names by replacing clients.Client.auth method
+# 09/05/2012    0.15    change the way events EVT_CLIENT_CONNECT and EVT_CLIENT_AUTH work
+#                       fix EVT_CLIENT_DISCONNECT
 
 #
 
 __author__  = 'Courgette, 82ndab-Bravo17'
-__version__ = '0.14'
+__version__ = '0.15'
 
 
 import sys, re, traceback, time, string, Queue, threading, new
