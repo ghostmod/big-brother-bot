@@ -293,57 +293,58 @@ class AbstractParser(b3.parser.Parser):
         
         if packet is None:
             self.warning('cannot route empty packet : %s' % traceback.extract_tb(sys.exc_info()[2]))
-            
-        self.info('Server Packet is %s' % packet)
+
+        message = packet.decode(encoding="UTF-8")
+        self.info('Server Message is %s' % message)
         eventData = ''
         eventType = ''
-        if packet.startswith('RCon admin #'):
+        if message.startswith('RCon admin #'):
             func = 'OnServerMessage'
-            eventData = packet[12:]
-        elif packet.startswith('Player #'):
-            if packet.endswith(' disconnected'):
+            eventData = message[12:]
+        elif message.startswith('Player #'):
+            if message.endswith(' disconnected'):
                 func ='OnPlayerLeave'
-                eventData = packet[8:len(packet)-13]
-            elif packet.endswith(' connected'):
+                eventData = message[8:len(message)-13]
+            elif message.endswith(' connected'):
                 func ='OnPlayerConnected'
-                eventData = packet[8:len(packet)-10]
-            elif packet.endswith('(unverified)'):
+                eventData = message[8:len(message)-10]
+            elif message.endswith('(unverified)'):
                 func = 'OnUnverifiedGUID'
-                eventData = packet[8:len(packet)-13]
-            elif packet.find(' has been kicked by BattlEye: '):
+                eventData = message[8:len(message)-13]
+            elif message.find(' has been kicked by BattlEye: '):
                 func = 'OnBattleyeKick'
-                eventData = packet[8:]
+                eventData = message[8:]
             else:
-                self.debug('Unhandled server message %s' % packet)
+                self.debug('Unhandled server message %s' % message)
                 eventData = None
                 func = 'OnUnknownEvent'
-        elif packet.startswith('Verified GUID'):
+        elif message.startswith('Verified GUID'):
             func = 'OnVerifiedGUID'
-            eventData = (packet[15:])
-        elif packet.startswith('(Lobby)'):
+            eventData = (message[15:])
+        elif message.startswith('(Lobby)'):
             func = 'OnPlayerChat'
-            eventData = packet[7:] + ' (Lobby)'
-        elif packet.startswith('(Global)'):
+            eventData = message[7:] + ' (Lobby)'
+        elif message.startswith('(Global)'):
             func = 'OnPlayerChat'
-            eventData = packet[8:] + ' (Global)'
-        elif packet.startswith('(Direct)'):
+            eventData = message[8:] + ' (Global)'
+        elif message.startswith('(Direct)'):
             func = 'OnPlayerChat'
-            eventData = packet[8:] + ' (Direct)'
-        elif packet.startswith('(Vehicle)'):
+            eventData = message[8:] + ' (Direct)'
+        elif message.startswith('(Vehicle)'):
             func = 'OnPlayerChat'
-            eventData = packet[9:] + ' (Vehicle)'
-        elif packet.startswith('(Group)'):
+            eventData = message[9:] + ' (Vehicle)'
+        elif message.startswith('(Group)'):
             func = 'OnPlayerChat'
-            eventData = packet[7:] + ' (Group)'
-        elif packet.startswith('(Side)'):
+            eventData = message[7:] + ' (Group)'
+        elif message.startswith('(Side)'):
             func = 'OnPlayerChat'
-            eventData = packet[6:] + ' (Side)'
-        elif packet.startswith('(Command)'):
+            eventData = message[6:] + ' (Side)'
+        elif message.startswith('(Command)'):
             func = 'OnPlayerChat'
-            eventData = packet[9:] + ' (Command)'
+            eventData = message[9:] + ' (Command)'
 
         else:
-            self.debug('Unhandled server message %s' % packet)
+            self.debug('Unhandled server message %s' % message)
             eventData = None
             func = 'OnUnknownEvent'
         
