@@ -249,7 +249,7 @@ class Test_game_events_parsing(Arma2TestCase):
         # GIVEN
         self.clear_events()
         # WHEN routeBattleyeMessagePacket is given a UTF-8 encoded message
-        self.parser.routeBattleyeMessagePacket(u"""Player #0 F00Åéxx (11.1.1.8:2304) connected""".encode(encoding="UTF-8"))
+        self.parser.routeBattleyeMessagePacket(u"""Player #0 F00Åéxx (11.1.1.8:2304) connected""".encode("UTF-8"))
         # THEN
         self.assertEqual(1, len(self.evt_queue))
         event = self.evt_queue[0]

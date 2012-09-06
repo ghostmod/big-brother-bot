@@ -294,7 +294,7 @@ class AbstractParser(b3.parser.Parser):
         if packet is None:
             self.warning('cannot route empty packet : %s' % traceback.extract_tb(sys.exc_info()[2]))
 
-        message = packet.decode(encoding="UTF-8")
+        message = packet.decode("UTF-8")
         self.info('Server Message is %s' % message)
         eventData = ''
         eventType = ''
