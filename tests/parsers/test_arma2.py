@@ -46,7 +46,7 @@ class Arma2TestCase(unittest.TestCase):
 
 
 
-class Test_game_events_parsing(Arma2TestCase):
+class EventParsingTestCase(Arma2TestCase):
 
     def setUp(self):
         """ran before each test"""
@@ -102,7 +102,6 @@ class Test_game_events_parsing(Arma2TestCase):
             self.fail("expecting %s. Got no event instead" % expected_event)
         elif len(self.evt_queue) == 1:
             assert_event_equals(expected_event, self.evt_queue[0])
-#            self.assertEqual(str(expected_event), str(self.evt_queue[0]))
         else:
             for evt in self.evt_queue:
                 try:
@@ -110,12 +109,14 @@ class Test_game_events_parsing(Arma2TestCase):
                     return
                 except Exception:
                     pass
-#                if str(expected_event) == str(evt):
-#                    return
             self.fail("expecting event %s. Got instead: %s" % (expected_event, map(str, self.evt_queue)))
 
 
     ################################################################################################################
+
+
+
+class Test_game_events_parsing(EventParsingTestCase):
 
     def test_player_connected(self):
         # GIVEN
@@ -245,6 +246,8 @@ class Test_game_events_parsing(Arma2TestCase):
         self.assert_has_event("EVT_CLIENT_SAY", client=bravo17, data='test command channel (Command)')
 
 
+class Test_utf8_issues(EventParsingTestCase):
+
     def test_player_connected_utf8(self):
         # GIVEN
         self.clear_events()
@@ -255,6 +258,28 @@ class Test_game_events_parsing(Arma2TestCase):
         event = self.evt_queue[0]
         self.assertEqual(self.parser.getEventID("EVT_CLIENT_CONNECT"), event.type)
         self.assertEqual(u"F00Åéxx", event.client.name)
-        self.assertEqual("0", event.client.cid)
-        self.assertEqual("11.1.1.8", event.client.ip)
+
+
+    def test_player_connected_utf8_2(self):
+        # GIVEN
+        self.clear_events()
+        # WHEN
+        self.parser.routeBattleyeMessagePacket(u'Player #1 étoiléàtèsté (77.205.193.131:2304) connected'.encode('UTF-8'))
+        # THEN
+        self.assertEqual(1, len(self.evt_queue))
+        event = self.evt_queue[0]
+        self.assertEqual(self.parser.getEventID("EVT_CLIENT_CONNECT"), event.type)
+        self.assertEqual(u"étoiléàtèsté", event.client.name)
+
+
+    def test_verified_guid(self):
+        # GIVEN
+        self.clear_events()
+        # WHEN
+        self.parser.routeBattleyeMessagePacket(u'Verified GUID (a4c3eba0a790300fd7d9d39e26e00eb0) of player #1 étoiléàtèsté'.encode("UTF-8"))
+        # THEN
+        self.assertTrue(len(self.evt_queue))
+        event = self.evt_queue[0]
+        self.assertEqual(self.parser.getEventID("EVT_CLIENT_CONNECT"), event.type)
+        self.assertEqual(u"étoiléàtèsté", event.client.name)
 
