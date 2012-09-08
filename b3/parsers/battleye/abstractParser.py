@@ -105,7 +105,7 @@ class AbstractParser(b3.parser.Parser):
     _player_list_errors = 0
     _process_delay = 0.05
     _regPlayer = re.compile(r'^(?P<cid>[0-9]+)\s+(?P<ip>[0-9.]+):(?P<port>[0-9]+)\s+(?P<ping>[0-9-]+)\s+(?P<guid>[0-9a-f]+)\((?P<verified>[A-Z\?]+)\)\s+(?P<name>.*?)$', re.I)
-    _regPlayer_lobby = re.compile(r'^(?P<cid>[0-9]+)\s+(?P<ip>[0-9.]+):(?P<port>[0-9]+)\s+(?P<ping>[0-9-]+)\s+(?P<guid>[0-9a-f]+)\((?P<verified>[A-Z\?]+)\)\s+(?P<name>.*?)(?P<lobby>\(Lobby\))$', re.I)
+    _regPlayer_lobby = re.compile(r'^(?P<cid>[0-9]+)\s+(?P<ip>[0-9.]+):(?P<port>[0-9]+)\s+(?P<ping>[0-9-]+)\s+(?P<guid>[0-9a-f]+)\((?P<verified>[A-Z\?]+)\)\s+(?P<name>.*?)\s+(?P<lobby>\(Lobby\))$', re.I)
     
     # if ban_with_server is True, then the Battleye server will be used for ban
     ban_with_server = True
@@ -370,7 +370,7 @@ class AbstractParser(b3.parser.Parser):
             if func:
                 data = func + ' '
             data += str(eventType) + ': ' + str(eventData)
-            self.warning('TODO : handle \'%r\' battleye events' % packet)
+            self.warning('TODO : handle \'%r\' battleye events' % eventData)
             self.queueEvent(b3.events.Event(b3.events.EVT_UNKNOWN, data))
 
         
@@ -404,19 +404,20 @@ class AbstractParser(b3.parser.Parser):
                 
             else:
                 return
-                
-        if packet[0:18] == 'Players on server:':
+
+        message = packet.decode("UTF-8")
+        if message[0:18] == 'Players on server:':
             func = 'OnPlayerList'        
             self.debug('Found playerlist')
-            eventData = packet
-        elif packet[0:10] == 'GUID Bans:':
+            eventData = message
+        elif message[0:10] == 'GUID Bans:':
             func = 'OnBanList'
             self.debug('Got Bans List')
-            eventData = packet
-        elif packet == 'Unknown command':
+            eventData = message
+        elif message == 'Unknown command':
             self.debug('Server recieved an Unknown command from us')
         else:
-            self.debug('Unhandled server response %s' % packet)
+            self.debug('Unhandled server response %s' % message)
 
         if func:
             self.call_func(func, eventType, eventData)

@@ -17,8 +17,10 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #
+import time
 import unittest2 as unittest
 from mock import Mock, patch
+from mockito import when
 from b3.fake import FakeClient
 from b3.parsers.arma2 import Arma2Parser
 from b3.config import XmlConfigParser
@@ -64,6 +66,9 @@ class EventParsingTestCase(Arma2TestCase):
         self.queueEvent_patcher = patch.object(self.parser, "queueEvent", wraps=queue_event)
         self.queueEvent_mock = self.queueEvent_patcher.start()
 
+        self.write_patcher = patch.object(self.parser, "write")
+        self.write_mock = self.write_patcher.start()
+
         self.parser.startup()
 
 
@@ -71,6 +76,7 @@ class EventParsingTestCase(Arma2TestCase):
         """ran after each test to clean up"""
         Arma2TestCase.tearDown(self)
         self.queueEvent_patcher.stop()
+        self.write_patcher.stop()
         if hasattr(self, "parser"):
             self.parser.working = False
 
@@ -282,4 +288,36 @@ class Test_utf8_issues(EventParsingTestCase):
         event = self.evt_queue[0]
         self.assertEqual(self.parser.getEventID("EVT_CLIENT_CONNECT"), event.type)
         self.assertEqual(u"étoiléàtèsté", event.client.name)
+
+
+
+class Test_getPlayerList(EventParsingTestCase):
+
+    def test_one_player_connected_plus_one_in_lobby(self):
+        # GIVEN
+        def write(*args, **kwargs):
+            if args[0] == ('players',):
+                self.parser.routeBattleyeResponsePacket(u'''\
+Players on server:
+[#] [IP Address]:[Port] [Ping] [GUID] [Name]
+--------------------------------------------------
+0   11.111.11.11:2304     63   80a5885eb00000000000000000000000(OK) étoiléàÄ
+0   192.168.0.100:2316    0    80a5885eb00000000000000000000000(OK) étoiléàÄ (Lobby)
+(1 players in total)
+'''.encode("UTF-8"))
+        self.write_mock.side_effect = write
+        self.clear_events()
+        # WHEN
+        players = self.parser.getPlayerList()
+        # THEN
+        self.maxDiff = 1024
+        self.assertDictEqual({u'0': {'cid': u'0',
+                                     'guid': u'80a5885eb00000000000000000000000',
+                                     'ip': u'192.168.0.100',
+                                     'lobby': True,
+                                     'name': u'étoiléàÄ',
+                                     'ping': u'0',
+                                     'port': u'2316',
+                                     'verified': u'OK'}}, players)
+
 
