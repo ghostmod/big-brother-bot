@@ -1,3 +1,4 @@
+# -*- encoding: utf-8 -*-
 #
 # BigBrotherBot(B3) (www.bigbrotherbot.net)
 # Copyright (C) 2012 Courgette
@@ -16,8 +17,10 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #
+import time
 import unittest2 as unittest
 from mock import Mock, patch
+from mockito import when
 from b3.fake import FakeClient
 from b3.parsers.arma2 import Arma2Parser
 from b3.config import XmlConfigParser
@@ -45,7 +48,7 @@ class Arma2TestCase(unittest.TestCase):
 
 
 
-class Test_game_events_parsing(Arma2TestCase):
+class EventParsingTestCase(Arma2TestCase):
 
     def setUp(self):
         """ran before each test"""
@@ -63,6 +66,9 @@ class Test_game_events_parsing(Arma2TestCase):
         self.queueEvent_patcher = patch.object(self.parser, "queueEvent", wraps=queue_event)
         self.queueEvent_mock = self.queueEvent_patcher.start()
 
+        self.write_patcher = patch.object(self.parser, "write")
+        self.write_mock = self.write_patcher.start()
+
         self.parser.startup()
 
 
@@ -70,6 +76,7 @@ class Test_game_events_parsing(Arma2TestCase):
         """ran after each test to clean up"""
         Arma2TestCase.tearDown(self)
         self.queueEvent_patcher.stop()
+        self.write_patcher.stop()
         if hasattr(self, "parser"):
             self.parser.working = False
 
@@ -86,19 +93,36 @@ class Test_game_events_parsing(Arma2TestCase):
         assert that self.evt_queue contains at least one event for the given type that has the given characteristics.
         """
         assert isinstance(event_type, basestring)
+
+        def assert_event_equals(expected_event, actual_event):
+            if expected_event is None:
+                self.assertIsNone(actual_event)
+            self.assertEqual(expected_event.type, actual_event.type, "expecting type %s, but got %s" %
+                                                                     (self.parser.getEventKey(expected_event.type), self.parser.getEventKey(actual_event.type)))
+            self.assertEqual(expected_event.client, actual_event.client, "expecting client %s, but got %s" % (expected_event.client, actual_event.client))
+            self.assertEqual(expected_event.target, actual_event.target, "expecting target %s, but got %s" % (expected_event.target, actual_event.target))
+            self.assertEqual(expected_event.data, actual_event.data, "expecting data %s, but got %s" % (expected_event.data, actual_event.data))
+
         expected_event = self.parser.getEvent(event_type, data, client, target)
         if not len(self.evt_queue):
             self.fail("expecting %s. Got no event instead" % expected_event)
         elif len(self.evt_queue) == 1:
-            self.assertEqual(str(expected_event), str(self.evt_queue[0]))
+            assert_event_equals(expected_event, self.evt_queue[0])
         else:
             for evt in self.evt_queue:
-                if str(expected_event) == str(evt):
+                try:
+                    assert_event_equals(expected_event, evt)
                     return
+                except Exception:
+                    pass
             self.fail("expecting event %s. Got instead: %s" % (expected_event, map(str, self.evt_queue)))
 
 
     ################################################################################################################
+
+
+
+class Test_game_events_parsing(EventParsingTestCase):
 
     def test_player_connected(self):
         # GIVEN
@@ -125,7 +149,7 @@ class Test_game_events_parsing(Arma2TestCase):
         self.assert_has_event("EVT_CLIENT_AUTH", data=bravo17, client=bravo17)
 
 
-    def test_Verified_guid__with_unknonw_player(self):
+    def test_Verified_guid__with_unknown_player(self):
         # GIVEN
         self.clear_events()
         # WHEN
@@ -226,4 +250,74 @@ class Test_game_events_parsing(Arma2TestCase):
         self.parser.routeBattleyeMessagePacket("""(Command) Bravo17: test command channel""")
         # THEN
         self.assert_has_event("EVT_CLIENT_SAY", client=bravo17, data='test command channel (Command)')
+
+
+class Test_utf8_issues(EventParsingTestCase):
+
+    def test_player_connected_utf8(self):
+        # GIVEN
+        self.clear_events()
+        # WHEN routeBattleyeMessagePacket is given a UTF-8 encoded message
+        self.parser.routeBattleyeMessagePacket(u"""Player #0 F00Åéxx (11.1.1.8:2304) connected""".encode("UTF-8"))
+        # THEN
+        self.assertEqual(1, len(self.evt_queue))
+        event = self.evt_queue[0]
+        self.assertEqual(self.parser.getEventID("EVT_CLIENT_CONNECT"), event.type)
+        self.assertEqual(u"F00Åéxx", event.client.name)
+
+
+    def test_player_connected_utf8_2(self):
+        # GIVEN
+        self.clear_events()
+        # WHEN
+        self.parser.routeBattleyeMessagePacket(u'Player #1 étoiléàtèsté (77.205.193.131:2304) connected'.encode('UTF-8'))
+        # THEN
+        self.assertEqual(1, len(self.evt_queue))
+        event = self.evt_queue[0]
+        self.assertEqual(self.parser.getEventID("EVT_CLIENT_CONNECT"), event.type)
+        self.assertEqual(u"étoiléàtèsté", event.client.name)
+
+
+    def test_verified_guid(self):
+        # GIVEN
+        self.clear_events()
+        # WHEN
+        self.parser.routeBattleyeMessagePacket(u'Verified GUID (a4c3eba0a790300fd7d9d39e26e00eb0) of player #1 étoiléàtèsté'.encode("UTF-8"))
+        # THEN
+        self.assertTrue(len(self.evt_queue))
+        event = self.evt_queue[0]
+        self.assertEqual(self.parser.getEventID("EVT_CLIENT_CONNECT"), event.type)
+        self.assertEqual(u"étoiléàtèsté", event.client.name)
+
+
+
+class Test_getPlayerList(EventParsingTestCase):
+
+    def test_one_player_connected_plus_one_in_lobby(self):
+        # GIVEN
+        def write(*args, **kwargs):
+            if args[0] == ('players',):
+                self.parser.routeBattleyeResponsePacket(u'''\
+Players on server:
+[#] [IP Address]:[Port] [Ping] [GUID] [Name]
+--------------------------------------------------
+0   11.111.11.11:2304     63   80a5885eb00000000000000000000000(OK) étoiléàÄ
+0   192.168.0.100:2316    0    80a5885eb00000000000000000000000(OK) étoiléàÄ (Lobby)
+(1 players in total)
+'''.encode("UTF-8"))
+        self.write_mock.side_effect = write
+        self.clear_events()
+        # WHEN
+        players = self.parser.getPlayerList()
+        # THEN
+        self.maxDiff = 1024
+        self.assertDictEqual({u'0': {'cid': u'0',
+                                     'guid': u'80a5885eb00000000000000000000000',
+                                     'ip': u'192.168.0.100',
+                                     'lobby': True,
+                                     'name': u'étoiléàÄ',
+                                     'ping': u'0',
+                                     'port': u'2316',
+                                     'verified': u'OK'}}, players)
+
 

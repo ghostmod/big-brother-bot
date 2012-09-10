@@ -105,7 +105,7 @@ class AbstractParser(b3.parser.Parser):
     _player_list_errors = 0
     _process_delay = 0.05
     _regPlayer = re.compile(r'^(?P<cid>[0-9]+)\s+(?P<ip>[0-9.]+):(?P<port>[0-9]+)\s+(?P<ping>[0-9-]+)\s+(?P<guid>[0-9a-f]+)\((?P<verified>[A-Z\?]+)\)\s+(?P<name>.*?)$', re.I)
-    _regPlayer_lobby = re.compile(r'^(?P<cid>[0-9]+)\s+(?P<ip>[0-9.]+):(?P<port>[0-9]+)\s+(?P<ping>[0-9-]+)\s+(?P<guid>[0-9a-f]+)\((?P<verified>[A-Z\?]+)\)\s+(?P<name>.*?)(?P<lobby>\(Lobby\))$', re.I)
+    _regPlayer_lobby = re.compile(r'^(?P<cid>[0-9]+)\s+(?P<ip>[0-9.]+):(?P<port>[0-9]+)\s+(?P<ping>[0-9-]+)\s+(?P<guid>[0-9a-f]+)\((?P<verified>[A-Z\?]+)\)\s+(?P<name>.*?)\s+(?P<lobby>\(Lobby\))$', re.I)
     
     # if ban_with_server is True, then the Battleye server will be used for ban
     ban_with_server = True
@@ -293,57 +293,58 @@ class AbstractParser(b3.parser.Parser):
         
         if packet is None:
             self.warning('cannot route empty packet : %s' % traceback.extract_tb(sys.exc_info()[2]))
-            
-        self.info('Server Packet is %s' % packet)
+
+        message = packet.decode("UTF-8")
+        self.info('Server Message is %s' % message)
         eventData = ''
         eventType = ''
-        if packet.startswith('RCon admin #'):
+        if message.startswith('RCon admin #'):
             func = 'OnServerMessage'
-            eventData = packet[12:]
-        elif packet.startswith('Player #'):
-            if packet.endswith(' disconnected'):
+            eventData = message[12:]
+        elif message.startswith('Player #'):
+            if message.endswith(' disconnected'):
                 func ='OnPlayerLeave'
-                eventData = packet[8:len(packet)-13]
-            elif packet.endswith(' connected'):
+                eventData = message[8:len(message)-13]
+            elif message.endswith(' connected'):
                 func ='OnPlayerConnected'
-                eventData = packet[8:len(packet)-10]
-            elif packet.endswith('(unverified)'):
+                eventData = message[8:len(message)-10]
+            elif message.endswith('(unverified)'):
                 func = 'OnUnverifiedGUID'
-                eventData = packet[8:len(packet)-13]
-            elif packet.find(' has been kicked by BattlEye: '):
+                eventData = message[8:len(message)-13]
+            elif message.find(' has been kicked by BattlEye: '):
                 func = 'OnBattleyeKick'
-                eventData = packet[8:]
+                eventData = message[8:]
             else:
-                self.debug('Unhandled server message %s' % packet)
+                self.debug('Unhandled server message %s' % message)
                 eventData = None
                 func = 'OnUnknownEvent'
-        elif packet.startswith('Verified GUID'):
+        elif message.startswith('Verified GUID'):
             func = 'OnVerifiedGUID'
-            eventData = (packet[15:])
-        elif packet.startswith('(Lobby)'):
+            eventData = (message[15:])
+        elif message.startswith('(Lobby)'):
             func = 'OnPlayerChat'
-            eventData = packet[7:] + ' (Lobby)'
-        elif packet.startswith('(Global)'):
+            eventData = message[7:] + ' (Lobby)'
+        elif message.startswith('(Global)'):
             func = 'OnPlayerChat'
-            eventData = packet[8:] + ' (Global)'
-        elif packet.startswith('(Direct)'):
+            eventData = message[8:] + ' (Global)'
+        elif message.startswith('(Direct)'):
             func = 'OnPlayerChat'
-            eventData = packet[8:] + ' (Direct)'
-        elif packet.startswith('(Vehicle)'):
+            eventData = message[8:] + ' (Direct)'
+        elif message.startswith('(Vehicle)'):
             func = 'OnPlayerChat'
-            eventData = packet[9:] + ' (Vehicle)'
-        elif packet.startswith('(Group)'):
+            eventData = message[9:] + ' (Vehicle)'
+        elif message.startswith('(Group)'):
             func = 'OnPlayerChat'
-            eventData = packet[7:] + ' (Group)'
-        elif packet.startswith('(Side)'):
+            eventData = message[7:] + ' (Group)'
+        elif message.startswith('(Side)'):
             func = 'OnPlayerChat'
-            eventData = packet[6:] + ' (Side)'
-        elif packet.startswith('(Command)'):
+            eventData = message[6:] + ' (Side)'
+        elif message.startswith('(Command)'):
             func = 'OnPlayerChat'
-            eventData = packet[9:] + ' (Command)'
+            eventData = message[9:] + ' (Command)'
 
         else:
-            self.debug('Unhandled server message %s' % packet)
+            self.debug('Unhandled server message %s' % message)
             eventData = None
             func = 'OnUnknownEvent'
         
@@ -369,7 +370,7 @@ class AbstractParser(b3.parser.Parser):
             if func:
                 data = func + ' '
             data += str(eventType) + ': ' + str(eventData)
-            self.warning('TODO : handle \'%r\' battleye events' % packet)
+            self.warning('TODO : handle \'%r\' battleye events' % eventData)
             self.queueEvent(b3.events.Event(b3.events.EVT_UNKNOWN, data))
 
         
@@ -403,19 +404,20 @@ class AbstractParser(b3.parser.Parser):
                 
             else:
                 return
-                
-        if packet[0:18] == 'Players on server:':
+
+        message = packet.decode("UTF-8")
+        if message[0:18] == 'Players on server:':
             func = 'OnPlayerList'        
             self.debug('Found playerlist')
-            eventData = packet
-        elif packet[0:10] == 'GUID Bans:':
+            eventData = message
+        elif message[0:10] == 'GUID Bans:':
             func = 'OnBanList'
             self.debug('Got Bans List')
-            eventData = packet
-        elif packet == 'Unknown command':
+            eventData = message
+        elif message == 'Unknown command':
             self.debug('Server recieved an Unknown command from us')
         else:
-            self.debug('Unhandled server response %s' % packet)
+            self.debug('Unhandled server response %s' % message)
 
         if func:
             self.call_func(func, eventType, eventData)
