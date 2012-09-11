@@ -23,11 +23,12 @@
 # 09/01/2012    0.14    Allow for non-ascii names by replacing clients.Client.auth method
 # 09/05/2012    0.15    change the way events EVT_CLIENT_CONNECT and EVT_CLIENT_AUTH work
 #                       fix EVT_CLIENT_DISCONNECT
+# 09/1012012    0.16    Make all player names safe by pseudo-encoding non-ascii characters
 
 #
 
 __author__  = 'Courgette, 82ndab-Bravo17'
-__version__ = '0.15'
+__version__ = '0.16'
 
 
 import sys, re, traceback, time, string, Queue, threading, new
@@ -69,6 +70,7 @@ class AbstractParser(b3.parser.Parser):
     # battleye engine does not support color code, so we need this property
     # in order to get stripColors working
     _reColor = re.compile(r'(\^[0-9])')
+    _reSafename = re.compile(r"('|\\)")
 
     _settings = {
         'line_length': 128,
@@ -133,7 +135,7 @@ class AbstractParser(b3.parser.Parser):
         
             ## This block will send the logging info to a separate file
             FORMAT = "%(asctime)s %(name)-20s [%(thread)-4d] %(threadName)-15s %(levelname)-8s %(message)s"
-            #FORMAT = '%(asctime)s %(levelname)s %(message)s'
+
          
             hdlr = logging.FileHandler(server_logging)
             formatter = logging.Formatter(FORMAT)
@@ -294,7 +296,7 @@ class AbstractParser(b3.parser.Parser):
         if packet is None:
             self.warning('cannot route empty packet : %s' % traceback.extract_tb(sys.exc_info()[2]))
 
-        message = packet.decode("UTF-8")
+        message = self.processPacketfromserver(packet)
         self.info('Server Message is %s' % message)
         eventData = ''
         eventType = ''
@@ -405,7 +407,7 @@ class AbstractParser(b3.parser.Parser):
             else:
                 return
 
-        message = packet.decode("UTF-8")
+        message = self.processPacketfromserver(packet)
         if message[0:18] == 'Players on server:':
             func = 'OnPlayerList'        
             self.debug('Found playerlist')
@@ -434,7 +436,6 @@ class AbstractParser(b3.parser.Parser):
         self.load_config_message_delay()
 
         self.start_sayqueue_worker()
-
         # start crontab to trigger playerlist events
         self.cron + b3.cron.CronTab(self.clients.sync, minute='*/1')
         self.clients.newClient('Server', guid='Server', name='Server', hide=True, pbid='Server', team=b3.TEAM_UNKNOWN, squad=None)
@@ -556,7 +557,7 @@ class AbstractParser(b3.parser.Parser):
         
 
         name, sep, message = data.partition(': ')
-        name = name.strip()
+        name = self.getSafeusername(name)
         self.debug('Name = %s, Message = %s Name length = %s' % (name, message, len(name)))
         
         self.debug('Looking for client %s' % name)
@@ -600,7 +601,8 @@ class AbstractParser(b3.parser.Parser):
         Player has left the server
         """
         parts = data.split(' ', 1)
-        client = self.getClient(name=parts[1], cid=parts[0])
+        name = self.getSafeusername(parts[1])
+        client = self.getClient(name=name, cid=parts[0])
         if client: 
             client.disconnect() # this triggers the EVT_CLIENT_DISCONNECT event
         return None
@@ -615,7 +617,7 @@ class AbstractParser(b3.parser.Parser):
         data, sep, ip = data.rpartition('(')
         ip = ip.partition(':')[0]
         cid, sep, name = data.partition(' ')
-        name = name.strip()
+        name = self.getSafeusername(name)
         self.clients.newClient(cid, name=name, ip=ip) # fires EVT_CLIENT_CONNECTED
 
 
@@ -637,7 +639,7 @@ class AbstractParser(b3.parser.Parser):
         guid = data.partition(')')[0]
         data = data .partition('#')[2]
         cid, sep, name = data.partition(' ')
-        name = name.strip()
+        name = self.getSafeusername(name)
 
         client = self.getClient(name=name, cid=cid, guid=guid)
         if client:
@@ -686,6 +688,7 @@ class AbstractParser(b3.parser.Parser):
         cid = player.partition(' ')[0]
         guid = player.rpartition('(')[2]
         name = data[len(cid)+1:-len(guid)-len(reason)-33]
+        name = self.getSafeusername(name)
         self.debug('Looking for client %s with GUID %s' % (name, guid))
         client = self.getClient(name, guid=guid, auth=False)
         if client: 
@@ -767,6 +770,7 @@ class AbstractParser(b3.parser.Parser):
             p = re.match(self._regPlayer_lobby, player_list[i])
             if p:
                 pl = p.groupdict()
+                pl['name'] = self.getSafeusername(pl['name'])
                 if pl['verified'] =='OK':
                     self.debug('Player: %s' % pl)
                     pl['lobby'] = True
@@ -779,6 +783,7 @@ class AbstractParser(b3.parser.Parser):
                 p = re.match(self._regPlayer, player_list[i])
                 if p:
                     pl = p.groupdict()
+                    pl['name'] = self.getSafeusername(pl['name'])
                     if pl['verified'] =='OK':
                         self.debug('Player: %s' % pl)
                         pl['lobby'] = False
@@ -1096,7 +1101,7 @@ class AbstractParser(b3.parser.Parser):
             result = b3.TEAM_UNKNOWN
         return result
         
-        
+
     ###############################################################################################
     #
     #    Other methods
@@ -1192,6 +1197,24 @@ class AbstractParser(b3.parser.Parser):
         self.bot('Restarting...')
         self.exitcode = 221
         sys.exit(221)
+        
+    def processPacketfromserver(self, packet):
+        #return packet.decode("UTF-8")
+        return packet
+        
+        
+    def getSafeusername(self, name):
+        """Retrieve the username and make it 'safe' """
+        name = '%r' % name
+        self.debug('namebefore = %s' % name)
+        name = self._reSafename.sub('', name)
+        name = name.strip()
+
+        name = self.stripColors(name)
+
+        self.debug('nameafter = %s' % name)            
+        return name
+ 
 
 #############################################################
 # Below is the code that changes a bit the b3.clients.Client
