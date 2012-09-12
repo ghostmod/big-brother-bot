@@ -326,28 +326,28 @@ class AbstractParser(b3.parser.Parser):
                 func = 'OnUnknownEvent'
         elif message.startswith('Verified GUID'):
             func = 'OnVerifiedGUID'
-            eventData = (message[15:])
+            eventData = message[15:]
         elif message.startswith('(Lobby)'):
             func = 'OnPlayerChat'
-            eventData = message[7:] + ' (Lobby)'
+            eventData = message[8:] + ' (Lobby)'
         elif message.startswith('(Global)'):
             func = 'OnPlayerChat'
-            eventData = message[8:] + ' (Global)'
+            eventData = message[9:] + ' (Global)'
         elif message.startswith('(Direct)'):
             func = 'OnPlayerChat'
-            eventData = message[8:] + ' (Direct)'
+            eventData = message[9:] + ' (Direct)'
         elif message.startswith('(Vehicle)'):
             func = 'OnPlayerChat'
-            eventData = message[9:] + ' (Vehicle)'
+            eventData = message[10:] + ' (Vehicle)'
         elif message.startswith('(Group)'):
             func = 'OnPlayerChat'
-            eventData = message[7:] + ' (Group)'
+            eventData = message[8:] + ' (Group)'
         elif message.startswith('(Side)'):
             func = 'OnPlayerChat'
-            eventData = message[6:] + ' (Side)'
+            eventData = message[7:] + ' (Side)'
         elif message.startswith('(Command)'):
             func = 'OnPlayerChat'
-            eventData = message[9:] + ' (Command)'
+            eventData = message[10:] + ' (Command)'
 
         else:
             self.debug('Unhandled server message %s' % message)
@@ -563,8 +563,8 @@ class AbstractParser(b3.parser.Parser):
         name, sep, message = data.partition(': ')
         self.debug('Name = %s, Message = %s Name length = %s' % (name, message, len(name)))
         
-        self.debug('Looking for client %s' % name)
-        client = self.getClient(name)
+        self.debug('Looking for client [%s]' % name)
+        client = self.getClient(name.lower(), auth=False)
 
         if client is None:
             self.warning("Could not get client :( %s" % traceback.extract_tb(sys.exc_info()[2]))
@@ -717,7 +717,7 @@ class AbstractParser(b3.parser.Parser):
         if not client:
             # try to get the client from the storage of already authed clients by name
             client = self.clients.getByName(name)
-        if auth and not client:
+        if auth and not client and cid and name:
             if cid == 'Server':
                 return self.clients.newClient('Server', guid='Server', name='Server', hide=True)
             client = self.clients.newClient(cid, guid=guid, name=name, ip=ip)
