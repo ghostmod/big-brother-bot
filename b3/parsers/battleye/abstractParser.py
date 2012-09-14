@@ -23,7 +23,7 @@
 # 09/01/2012    0.14    Allow for non-ascii names by replacing clients.Client.auth method
 # 09/05/2012    0.15    change the way events EVT_CLIENT_CONNECT and EVT_CLIENT_AUTH work
 #                       fix EVT_CLIENT_DISCONNECT
-# 09/10/12012    0.16   Fix UTF-8 encoding issues
+# 09/10/12012    0.16    Make all player names safe by pseudo-encoding non-ascii characters
 #
 
 __author__  = 'Courgette, 82ndab-Bravo17'
