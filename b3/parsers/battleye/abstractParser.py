@@ -23,7 +23,7 @@
 # 09/01/2012    0.14    Allow for non-ascii names by replacing clients.Client.auth method
 # 09/05/2012    0.15    change the way events EVT_CLIENT_CONNECT and EVT_CLIENT_AUTH work
 #                       fix EVT_CLIENT_DISCONNECT
-# 09/10/12012    0.16    Make all player names safe by pseudo-encoding non-ascii characters
+# 09/10/2012    0.16    Fix UTF-8 encoding issues
 #
 
 __author__  = 'Courgette, 82ndab-Bravo17'
@@ -815,8 +815,12 @@ class AbstractParser(b3.parser.Parser):
         for cid, c in plist.iteritems():
             client = self.clients.getByCID(cid)
             if client:
-                if getattr(c, 'guid', None) == client.guid:
-                    self.debug('Client found on server %s' % client)
+                try:
+                    c_guid = c['guid']
+                except:
+                    c_guid = None
+                if c_guid == client.guid:
+                    self.debug('Client found on server %s' % client.name)
                     mlist[cid] = client
                     self.debug ('Lobby is %s ' % c['lobby'])
                     if c['lobby'] and client.team != self.getTeam('lobby'):
