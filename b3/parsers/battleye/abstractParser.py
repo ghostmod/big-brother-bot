@@ -23,21 +23,21 @@
 # 09/01/2012    0.14    Allow for non-ascii names by replacing clients.Client.auth method
 # 09/05/2012    0.15    change the way events EVT_CLIENT_CONNECT and EVT_CLIENT_AUTH work
 #                       fix EVT_CLIENT_DISCONNECT
-
+# 09/10/12012    0.16   Fix UTF-8 encoding issues
 #
 
 __author__  = 'Courgette, 82ndab-Bravo17'
-__version__ = '0.15'
+__version__ = '0.16'
 
 
-import sys, re, traceback, time, string, Queue, threading, new
+import sys, re, traceback, time, Queue, threading
+from b3.output import VERBOSE2, VERBOSE
 import b3.parser
 from b3.parsers.battleye.rcon import Rcon as BattleyeRcon
 from b3.parsers.battleye.protocol import BattleyeServer, CommandFailedError, CommandError, NetworkError
 import b3.events
 import b3.cvar
 from b3.clients import Clients
-from b3.functions import getStuffSoundingLike
 
 
 
@@ -69,6 +69,7 @@ class AbstractParser(b3.parser.Parser):
     # battleye engine does not support color code, so we need this property
     # in order to get stripColors working
     _reColor = re.compile(r'(\^[0-9])')
+    _reSafename = re.compile(r"('|\\)")
 
     _settings = {
         'line_length': 128,
@@ -121,25 +122,30 @@ class AbstractParser(b3.parser.Parser):
         #self.screen.flush()
 
         self.updateDocumentation()
+
+        try:
+            b3_log_level = self.config.getint('b3', 'log_level')
+        except:
+            b3_log_level = VERBOSE
+
         server_logging = self.load_protocol_logging()
         ## the block below can activate additional logging for the BattleyeServer class
-        if server_logging:
+        if server_logging or b3_log_level == VERBOSE2:
             import logging
-            from b3.output import OutputHandler
             battleyeServerLogger = logging.getLogger("BattleyeServer")
             for handler in logging.getLogger('output').handlers:
                 battleyeServerLogger.addHandler(handler)
             battleyeServerLogger.setLevel(logging.getLogger('output').level)
         
-            ## This block will send the logging info to a separate file
-            FORMAT = "%(asctime)s %(name)-20s [%(thread)-4d] %(threadName)-15s %(levelname)-8s %(message)s"
-            #FORMAT = '%(asctime)s %(levelname)s %(message)s'
-         
-            hdlr = logging.FileHandler(server_logging)
-            formatter = logging.Formatter(FORMAT)
-            hdlr.setFormatter(formatter)
-            battleyeServerLogger.addHandler(hdlr)
-            battleyeServerLogger.setLevel(logging.DEBUG)
+            if server_logging:
+                ## This block will send the logging info to a separate file
+                FORMAT = "%(asctime)s %(name)-20s [%(thread)-4d] %(threadName)-15s %(levelname)-8s %(message)s"
+
+                hdlr = logging.FileHandler(server_logging)
+                formatter = logging.Formatter(FORMAT)
+                hdlr.setFormatter(formatter)
+                battleyeServerLogger.addHandler(hdlr)
+                battleyeServerLogger.setLevel(logging.DEBUG)
 
         while self.working:
             if not self._serverConnection or not self._serverConnection.connected:
@@ -239,7 +245,7 @@ class AbstractParser(b3.parser.Parser):
         self.say('%s ^2[ONLINE]' % b3.version)
         #self.getServerInfo()
         #self.getServerVars()
-        #self.clients.sync()
+        self.clients.sync()
 
 
     def close_battleye_connection(self):
@@ -294,7 +300,7 @@ class AbstractParser(b3.parser.Parser):
         if packet is None:
             self.warning('cannot route empty packet : %s' % traceback.extract_tb(sys.exc_info()[2]))
 
-        message = packet.decode("UTF-8")
+        message = self.processPacketfromserver(packet)
         self.info('Server Message is %s' % message)
         eventData = ''
         eventType = ''
@@ -320,28 +326,28 @@ class AbstractParser(b3.parser.Parser):
                 func = 'OnUnknownEvent'
         elif message.startswith('Verified GUID'):
             func = 'OnVerifiedGUID'
-            eventData = (message[15:])
+            eventData = message[15:]
         elif message.startswith('(Lobby)'):
             func = 'OnPlayerChat'
-            eventData = message[7:] + ' (Lobby)'
+            eventData = message[8:] + ' (Lobby)'
         elif message.startswith('(Global)'):
             func = 'OnPlayerChat'
-            eventData = message[8:] + ' (Global)'
+            eventData = message[9:] + ' (Global)'
         elif message.startswith('(Direct)'):
             func = 'OnPlayerChat'
-            eventData = message[8:] + ' (Direct)'
+            eventData = message[9:] + ' (Direct)'
         elif message.startswith('(Vehicle)'):
             func = 'OnPlayerChat'
-            eventData = message[9:] + ' (Vehicle)'
+            eventData = message[10:] + ' (Vehicle)'
         elif message.startswith('(Group)'):
             func = 'OnPlayerChat'
-            eventData = message[7:] + ' (Group)'
+            eventData = message[8:] + ' (Group)'
         elif message.startswith('(Side)'):
             func = 'OnPlayerChat'
-            eventData = message[6:] + ' (Side)'
+            eventData = message[7:] + ' (Side)'
         elif message.startswith('(Command)'):
             func = 'OnPlayerChat'
-            eventData = message[9:] + ' (Command)'
+            eventData = message[10:] + ' (Command)'
 
         else:
             self.debug('Unhandled server message %s' % message)
@@ -405,7 +411,7 @@ class AbstractParser(b3.parser.Parser):
             else:
                 return
 
-        message = packet.decode("UTF-8")
+        message = self.processPacketfromserver(packet)
         if message[0:18] == 'Players on server:':
             func = 'OnPlayerList'        
             self.debug('Found playerlist')
@@ -434,7 +440,6 @@ class AbstractParser(b3.parser.Parser):
         self.load_config_message_delay()
 
         self.start_sayqueue_worker()
-
         # start crontab to trigger playerlist events
         self.cron + b3.cron.CronTab(self.clients.sync, minute='*/1')
         self.clients.newClient('Server', guid='Server', name='Server', hide=True, pbid='Server', team=b3.TEAM_UNKNOWN, squad=None)
@@ -556,11 +561,10 @@ class AbstractParser(b3.parser.Parser):
         
 
         name, sep, message = data.partition(': ')
-        name = name.strip()
         self.debug('Name = %s, Message = %s Name length = %s' % (name, message, len(name)))
         
-        self.debug('Looking for client %s' % name)
-        client = self.getClient(name)
+        self.debug('Looking for client [%s]' % name)
+        client = self.getClient(name.lower(), auth=False)
 
         if client is None:
             self.warning("Could not get client :( %s" % traceback.extract_tb(sys.exc_info()[2]))
@@ -600,7 +604,8 @@ class AbstractParser(b3.parser.Parser):
         Player has left the server
         """
         parts = data.split(' ', 1)
-        client = self.getClient(name=parts[1], cid=parts[0])
+        name = parts[1]
+        client = self.getClient(name=name, cid=parts[0])
         if client: 
             client.disconnect() # this triggers the EVT_CLIENT_DISCONNECT event
         return None
@@ -615,8 +620,7 @@ class AbstractParser(b3.parser.Parser):
         data, sep, ip = data.rpartition('(')
         ip = ip.partition(':')[0]
         cid, sep, name = data.partition(' ')
-        name = name.strip()
-        self.clients.newClient(cid, name=name, ip=ip) # fires EVT_CLIENT_CONNECTED
+        self.getClient(cid=cid, name=name, ip=ip) # fires EVT_CLIENT_CONNECTED
 
 
     def OnUnverifiedGUID(self, action, data):
@@ -637,7 +641,6 @@ class AbstractParser(b3.parser.Parser):
         guid = data.partition(')')[0]
         data = data .partition('#')[2]
         cid, sep, name = data.partition(' ')
-        name = name.strip()
 
         client = self.getClient(name=name, cid=cid, guid=guid)
         if client:
@@ -693,6 +696,8 @@ class AbstractParser(b3.parser.Parser):
         
     def OnUnknownEvent(self, action, data):
         return False
+
+
     ###############################################################################################
     #
     #    B3 Parser interface implementation
@@ -712,15 +717,10 @@ class AbstractParser(b3.parser.Parser):
         if not client:
             # try to get the client from the storage of already authed clients by name
             client = self.clients.getByName(name)
-        if auth and not client:
+        if auth and not client and cid and name:
             if cid == 'Server':
                 return self.clients.newClient('Server', guid='Server', name='Server', hide=True)
-            if guid:
-                client = self.clients.newClient(cid, guid=guid, name=name, ip=ip)
-            else:
-                return None
-                
-            self.queueEvent(b3.events.Event(b3.events.EVT_CLIENT_JOIN, None, client))
+            client = self.clients.newClient(cid, guid=guid, name=name, ip=ip)
         return client
     
 #Players on server:\n
@@ -740,7 +740,7 @@ class AbstractParser(b3.parser.Parser):
         self.write(('players', ))
         timeout_time = time.time() + self._server_response_timeout
         while not self._player_list_from_server and time.time() < timeout_time:
-            self.debug('Waiting for player list')
+            self.verbose2('Waiting for player list')
             time.sleep(0.1)
         
         if self._player_list_from_server:
@@ -773,6 +773,8 @@ class AbstractParser(b3.parser.Parser):
                     players[pl['cid']] = pl
                 elif pl['verified'] =='?':
                         self.debug('Player in Lobby GUID not yet verified: %s' % pl)
+                        del pl['guid']
+                        players[pl['cid']] = pl
                 else:
                         self.debug('Player in Lobby GUID status unknown: %s' % pl)
             else:
@@ -785,6 +787,8 @@ class AbstractParser(b3.parser.Parser):
                         players[pl['cid']] = pl
                     elif pl['verified'] =='?':
                         self.debug('Player GUID not yet verified: %s' % pl)
+                        del pl['guid']
+                        players[pl['cid']] = pl
                     else:
                         self.debug('Player GUID status unknown: %s' % pl)
                 else:
@@ -798,22 +802,7 @@ class AbstractParser(b3.parser.Parser):
         """
         Authorise clients from player list
         """
-        players = self.getPlayerList()
-        self.verbose('authorizeClients() = %s' % players)
-
-        for cid, p in players.iteritems():
-            sp = self.clients.getByCID(cid)
-            if sp:
-                # Only set provided data, otherwise use the currently set data
-                sp.ip   = p.get('ip', sp.ip)
-                sp.pbid = p.get('pbid', sp.pbid)
-                sp.guid = p.get('guid', sp.guid)
-                sp.data = p
-                newTeam = p.get('teamId', None)
-                if newTeam is not None:
-                    sp.team = self.getTeam(newTeam)
-                sp.teamId = int(newTeam)
-                sp.auth()
+        pass # no need in this game as we always know player guid and verified status
 
 
     def sync(self):
@@ -826,7 +815,7 @@ class AbstractParser(b3.parser.Parser):
         for cid, c in plist.iteritems():
             client = self.clients.getByCID(cid)
             if client:
-                if c['guid'] == client.guid:
+                if getattr(c, 'guid', None) == client.guid:
                     self.debug('Client found on server %s' % client)
                     mlist[cid] = client
                     self.debug ('Lobby is %s ' % c['lobby'])
@@ -842,11 +831,10 @@ class AbstractParser(b3.parser.Parser):
                     self.debug('Removing %s from list' % client.name)
                     client.disconnect()
             else:
-                if c['verified'] == 'OK':
-                    self.debug('Look for client in storage')
-                    cl = self.getClient(c['name'], guid=c['guid'], cid=c['cid'], ip=c['ip'])
-                    if cl:
-                        mlist[cid] = cl
+                self.debug('Look for client in storage')
+                cl = self.getClient(c['name'], guid=c['guid'] if c['verified'] == 'OK' else None, cid=c['cid'], ip=c['ip'])
+                if cl:
+                    mlist[cid] = cl
                     
         # Now we need to remove any players that have left
         if self.clients:
@@ -963,7 +951,7 @@ class AbstractParser(b3.parser.Parser):
 
         self.debug('UNBAN: Name: %s, Ip: %s, Guid: %s' %(client.name, client.ip, client.guid))
         while self._server_response_lock:
-            time_sleep(0.5)
+            time.sleep(0.5)
         self._server_response_lock = True
         self.write( ('bans',) )
         timeout_time = time.time() + self._server_response_timeout
@@ -1096,28 +1084,13 @@ class AbstractParser(b3.parser.Parser):
             result = b3.TEAM_UNKNOWN
         return result
         
-        
+
     ###############################################################################################
     #
     #    Other methods
     #    
     ###############################################################################################
 
-
-    def getFullBanList(self):
-        """
-        query the Battleye game server and return a BanlistContent object containing all bans stored on the game
-        server memory.
-        """
-        response = BanlistContent()
-        offset = 0
-        tmp = self.write(('banList.list', offset))
-        tmp_num_bans = len(BanlistContent(tmp))
-        while tmp_num_bans:
-            response.append(tmp)
-            tmp = self.write(('banList.list', len(response)))
-            tmp_num_bans = len(BanlistContent(tmp))
-        return response
 
     def load_conf_max_say_line_length(self):
         if self.config.has_option(self.gameName, 'max_say_line_length'):
@@ -1193,17 +1166,24 @@ class AbstractParser(b3.parser.Parser):
         self.exitcode = 221
         sys.exit(221)
 
+
+    def processPacketfromserver(self, packet):
+        return packet.decode("UTF-8")
+
+
+
+
 #############################################################
 # Below is the code that changes a bit the b3.clients.Client
 # class at runtime. What the point of coding in python if we
 # cannot play with its dynamic nature ;)
 #
 # why ?
-# because doing so make sure we're not broking any other 
+# because doing so make sure we're not broking any other
 # working and long tested parser. The changes we make here
 # are only applied when the battleye parser is loaded.
 #############################################################
-  
+
 ## change the auth method in the Client class
 
 def battleyeClientAuthMethod(self):
@@ -1257,5 +1237,5 @@ def battleyeClientAuthMethod(self):
         return self.authed
     else:
         return False
-        
+
 b3.clients.Client.auth = battleyeClientAuthMethod
