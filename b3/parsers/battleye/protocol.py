@@ -87,8 +87,8 @@ class BattleyeServer(threading.Thread):
                         self.getLogger().debug("Data to send: %s" % repr(data))
                         try:
                             server.send(data)
-                        except:
-                            self.getLogger().debug("Data send error, trying again")
+                        except Exception, err:
+                            self.getLogger().debug("Data send error, trying again. %s" % err, exc_info=err)
                             self.write_queue.appendleft(data)
                         else:
                             #store seq_no, type, data
@@ -161,6 +161,8 @@ class BattleyeServer(threading.Thread):
                 
             except Queue.Empty:
                 pass
+            except Exception, err:
+                self.getLogger().error("error in reading_thread", exc_info=err)
                 
         self.getLogger().debug("Ending Reading Thread")
                 
@@ -186,6 +188,8 @@ class BattleyeServer(threading.Thread):
                     write_seq += 1
                     if write_seq > 255:
                         write_seq -= 256
+            except Exception, err:
+                self.getLogger().error("error in writing_thread", exc_info=err)
                 
         self.getLogger().debug("Ending Writing Thread")
 
@@ -199,6 +203,7 @@ class BattleyeServer(threading.Thread):
         self.getLogger().debug(self.write_queue)
         login_response = False
         t = time.time()
+        logged_in = None
         while time.time() < t+3 and not login_response:
             try:
                 packet = self.read_queue.get(timeout = 0.1)
@@ -254,18 +259,18 @@ class BattleyeServer(threading.Thread):
         #data_to_send = data_to_send + chr(255) + packet_type + bytearray(data, 'Latin-1', 'ignore')
         data_to_send.append(255)
         data_to_send.append(packet_type)
-        if seq != None:
+        if seq is not None:
             data_to_send.append(seq)
         if data:
             try:
                 if data and isinstance(data, str):
                     data=unicode(data, errors='ignore')
-                data=data.encode('Latin-1', 'replace')
+                data=data.encode('UTF-8', 'replace')
             except Exception, msg:
                 self.getLogger().debug('ERROR encoding data: %r' % msg)
                 data = 'Encoding error'
                 
-            data_to_send.extend(bytearray(data, 'Latin-1', 'ignore'))
+            data_to_send.extend(data)
         crc1, crc2, crc3, crc4 = self.compute_crc(data_to_send)
         # request =  "B" + "E" + chr(crc1) + chr(crc2) + chr(crc3) + chr(crc4) + data_to_send
         request = bytearray(b'BE')
@@ -281,7 +286,7 @@ class BattleyeServer(threading.Thread):
         if name == 'connected':
             return self._isconnected
         else:
-            self.name
+            return self.name
             
 
     def subscribe(self, func):
