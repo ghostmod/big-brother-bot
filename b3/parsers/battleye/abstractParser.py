@@ -24,21 +24,28 @@
 # 09/05/2012    0.15    change the way events EVT_CLIENT_CONNECT and EVT_CLIENT_AUTH work
 #                       fix EVT_CLIENT_DISCONNECT
 # 09/10/2012    0.16    Fix UTF-8 encoding issues
+# 09/15/2012    0.17
+#   - reduce code size by moving some network code to the protocol module
+#   - take advantage of new BattleyeServer.command() behaviour which is synchronous since protocol.py v1.1. This makes the parser much easier to write/read
+#   - move all UTF-8 encoding/decoding related code to the protocol module. In the B3 parser code, there is no need to worry about those issues.
+#   - remove unused or unnecessary code
+#   - fix ban (by cid)
+#   - add prefix to say/saybig/message methods
+#   - implements getPlayerPings()
+#   - add method getBanlist()
 #
-
-__author__  = 'Courgette, 82ndab-Bravo17'
-__version__ = '0.16'
-
-
 import sys, re, traceback, time, Queue, threading
+from logging import Formatter
 from b3.output import VERBOSE2, VERBOSE
 import b3.parser
 from b3.parsers.battleye.rcon import Rcon as BattleyeRcon
-from b3.parsers.battleye.protocol import BattleyeServer, CommandFailedError, CommandError, NetworkError
+from b3.parsers.battleye.protocol import BattleyeServer, CommandFailedError, CommandError, BattleyeError, NetworkError
 import b3.events
 import b3.cvar
 from b3.clients import Clients
 
+__author__  = '82ndab-Bravo17, Courgette'
+__version__ = '0.17'
 
 
 # disable the authorizing timer that come by default with the b3.clients.Clients class
@@ -47,6 +54,7 @@ Clients.authorizeClients = lambda *args, **kwargs: None
 
 # how long should the bot try to connect to the Battleye server before giving out (in second)
 GAMESERVER_CONNECTION_WAIT_TIMEOUT = 600
+
 
 class AbstractParser(b3.parser.Parser):
     """
@@ -75,8 +83,6 @@ class AbstractParser(b3.parser.Parser):
         'line_length': 128,
         'min_wrap_length': 128,
         'message_delay': .8,
-        'big_msg_duration': 4,
-        'big_b3_private_responses': False,
         }
 
     _gameServerVars = () # list available cvar
@@ -96,20 +102,10 @@ class AbstractParser(b3.parser.Parser):
     _eventMap = {
     }
 
-    _client_auth_waiting = {}
-    _player_list_from_server = ''
-    _previous_player_list_from_server = ''
-    _ban_list_from_server = {}
-    _multi_packet_response = {}
-    _server_response_lock = False
-    _server_response_timeout = 5
-    _player_list_errors = 0
-    _process_delay = 0.05
     _regPlayer = re.compile(r'^(?P<cid>[0-9]+)\s+(?P<ip>[0-9.]+):(?P<port>[0-9]+)\s+(?P<ping>[0-9-]+)\s+(?P<guid>[0-9a-f]+)\((?P<verified>[A-Z\?]+)\)\s+(?P<name>.*?)$', re.I)
     _regPlayer_lobby = re.compile(r'^(?P<cid>[0-9]+)\s+(?P<ip>[0-9.]+):(?P<port>[0-9]+)\s+(?P<ping>[0-9-]+)\s+(?P<guid>[0-9a-f]+)\((?P<verified>[A-Z\?]+)\)\s+(?P<name>.*?)\s+(?P<lobby>\(Lobby\))$', re.I)
-    
-    # if ban_with_server is True, then the Battleye server will be used for ban
-    ban_with_server = True
+    re_playerlist = re.compile(r'''^\s*(?P<cid>[0-9]+)\s+(?P<ip>[0-9.]+):(?P<port>[0-9]+)\s+(?P<ping>[0-9-]+)\s+(?P<guid>[0-9a-f]+)\((?P<verified>[A-Z\?]+)\)\s+(?P<name>.*?)(?:\s+(?P<lobby>\(Lobby\)))?$''', re.I|re.MULTILINE)
+
 
     # flag to find out if we need to fire a EVT_GAME_ROUND_START event.
     _waiting_for_round_start = True
@@ -129,20 +125,21 @@ class AbstractParser(b3.parser.Parser):
             b3_log_level = VERBOSE
 
         server_logging = self.load_protocol_logging()
+
+        formatter = Formatter('"%(name)-15s [%(thread)-6d] %(threadName)-20s %(levelname)-8s %(message)s"')
         ## the block below can activate additional logging for the BattleyeServer class
         if server_logging or b3_log_level == VERBOSE2:
             import logging
             battleyeServerLogger = logging.getLogger("BattleyeServer")
             for handler in logging.getLogger('output').handlers:
+                handler.setFormatter(formatter)
                 battleyeServerLogger.addHandler(handler)
-            battleyeServerLogger.setLevel(logging.getLogger('output').level)
-        
+            battleyeServerLogger.setLevel(logging.INFO)
+
             if server_logging:
                 ## This block will send the logging info to a separate file
-                FORMAT = "%(asctime)s %(name)-20s [%(thread)-4d] %(threadName)-15s %(levelname)-8s %(message)s"
 
                 hdlr = logging.FileHandler(server_logging)
-                formatter = logging.Formatter(FORMAT)
                 hdlr.setFormatter(formatter)
                 battleyeServerLogger.addHandler(hdlr)
                 battleyeServerLogger.setLevel(logging.DEBUG)
@@ -151,6 +148,8 @@ class AbstractParser(b3.parser.Parser):
             if not self._serverConnection or not self._serverConnection.connected:
                 try:
                     self.setup_battleye_connection()
+                except CommandError, err:
+                    self.error(err.message)
                 except IOError, err:
                     self.error("IOError %s"% err)
                 except Exception, err:
@@ -160,19 +159,14 @@ class AbstractParser(b3.parser.Parser):
 
             try:
                 added, expire, event = self.battleye_event_queue.get(timeout=5)
-                type = event[0]
-                packet = event[1]
-                if type == 1:
-                    self.routeBattleyeResponsePacket(packet)
-                if type ==2:
-                    self.routeBattleyeMessagePacket(packet)
+                self.routeBattleyeEvent(event)
             except Queue.Empty:
                 self.verbose2("no game server event to treat in the last 5s")
             except CommandError, err:
                 # it does not matter from the parser perspective if Battleye command failed
                 # (timeout or bad reply)
                 self.warning(err)
-            except NetworkError, e:
+            except BattleyeError, e:
                 # the connection to the battleye server is lost
                 self.warning(e)
                 self.close_battleye_connection()
@@ -181,8 +175,6 @@ class AbstractParser(b3.parser.Parser):
                 self.error(e)
                 # unexpected exception, better close the battleye connection
                 self.close_battleye_connection()
-
-            time.sleep(self._process_delay)
 
         #self._serverConnection.stop()
         self.close_battleye_connection()
@@ -198,7 +190,7 @@ class AbstractParser(b3.parser.Parser):
 
             # The Battleye connection is running its own thread to communicate with the game server. We need to tell
             # this thread to stop.
-            # self.close_battleye_connection()
+            self.close_battleye_connection()
 
             # If !die was called, exitcode have been set to 222
             # If !restart was called, exitcode have been set to 221
@@ -208,10 +200,11 @@ class AbstractParser(b3.parser.Parser):
             if self.exitcode:
                 sys.exit(self.exitcode)
 
+
     def setup_battleye_connection(self):
-        '''
+        """
         Setup the Connection to the Battleye server
-        '''
+        """
         self.info('Connecting to battleye server  on %s:%s...' % (self._rconIp, self._rconPort))
         if self._serverConnection:
             self.close_battleye_connection()
@@ -234,9 +227,6 @@ class AbstractParser(b3.parser.Parser):
         # listen for incoming game server events
         self._serverConnection.subscribe(self.OnBattleyeEvent)
 
-        # self._serverConnection.auth()
-        # self._serverConnection.command('admin.eventsEnabled', 'true')
-
         # setup Rcon
         self.output.set_battleye_server(self._serverConnection)
 
@@ -254,20 +244,20 @@ class AbstractParser(b3.parser.Parser):
         except Exception:
             pass
         self._serverConnection = None
-        time.sleep(5)
 
-    def OnBattleyeEvent(self, packet):
+
+    def OnBattleyeEvent(self, event):
         if not self.working:
             try:
-                self.verbose("dropping Battleye event %r" % packet)
+                self.verbose("dropping Battleye event %r" % event)
             except:
                 pass
-        self.console(repr(packet))
+        self.console(repr(event))
         try:
-            self.battleye_event_queue.put((self.time(), self.time() + 10, packet), timeout=2)
+            self.battleye_event_queue.put((self.time(), self.time() + 10, event), timeout=2)
             self.info('Battleye Event Queue: %s' % repr(self.battleye_event_queue))
         except Queue.Full:
-            self.error("Battleye event queue full, dropping event %r" % packet)
+            self.error("Battleye event queue full, dropping event %r" % event)
 
             
 #'RCon admin #0 (76.108.91.78:62382) logged in'
@@ -292,142 +282,71 @@ class AbstractParser(b3.parser.Parser):
     
 
 
-    def routeBattleyeMessagePacket(self, packet):
-        '''
-        Decide what to do with the packet received from the Battleye server
-        '''
-        
-        if packet is None:
-            self.warning('cannot route empty packet : %s' % traceback.extract_tb(sys.exc_info()[2]))
+    def routeBattleyeEvent(self, message):
+        """
+        Decide what to do with the event received from the BattlEye server
+        """
 
-        message = self.processPacketfromserver(packet)
+        if message is None:
+            self.warning('cannot route empty event')
+
         self.info('Server Message is %s' % message)
-        eventData = ''
-        eventType = ''
+
         if message.startswith('RCon admin #'):
-            func = 'OnServerMessage'
+            func = self.OnServerMessage
             eventData = message[12:]
         elif message.startswith('Player #'):
             if message.endswith(' disconnected'):
-                func ='OnPlayerLeave'
+                func = self.OnPlayerLeave
                 eventData = message[8:len(message)-13]
             elif message.endswith(' connected'):
-                func ='OnPlayerConnected'
+                func = self.OnPlayerConnected
                 eventData = message[8:len(message)-10]
             elif message.endswith('(unverified)'):
-                func = 'OnUnverifiedGUID'
+                func = self.OnUnverifiedGUID
                 eventData = message[8:len(message)-13]
             elif message.find(' has been kicked by BattlEye: '):
-                func = 'OnBattleyeKick'
+                func = self.OnBattleyeKick
                 eventData = message[8:]
             else:
                 self.debug('Unhandled server message %s' % message)
                 eventData = None
-                func = 'OnUnknownEvent'
+                func = self.OnUnknownEvent
         elif message.startswith('Verified GUID'):
-            func = 'OnVerifiedGUID'
+            func = self.OnVerifiedGUID
             eventData = message[15:]
         elif message.startswith('(Lobby)'):
-            func = 'OnPlayerChat'
+            func = self.OnPlayerChat
             eventData = message[8:] + ' (Lobby)'
         elif message.startswith('(Global)'):
-            func = 'OnPlayerChat'
+            func = self.OnPlayerChat
             eventData = message[9:] + ' (Global)'
         elif message.startswith('(Direct)'):
-            func = 'OnPlayerChat'
+            func = self.OnPlayerChat
             eventData = message[9:] + ' (Direct)'
         elif message.startswith('(Vehicle)'):
-            func = 'OnPlayerChat'
+            func = self.OnPlayerChat
             eventData = message[10:] + ' (Vehicle)'
         elif message.startswith('(Group)'):
-            func = 'OnPlayerChat'
+            func = self.OnPlayerChat
             eventData = message[8:] + ' (Group)'
         elif message.startswith('(Side)'):
-            func = 'OnPlayerChat'
+            func = self.OnPlayerChat
             eventData = message[7:] + ' (Side)'
         elif message.startswith('(Command)'):
-            func = 'OnPlayerChat'
+            func = self.OnPlayerChat
             eventData = message[10:] + ' (Command)'
 
         else:
             self.debug('Unhandled server message %s' % message)
             eventData = None
-            func = 'OnUnknownEvent'
-        
-        self.call_func(func, eventType, eventData)
+            func = self.OnUnknownEvent
 
+        event = func(eventData)
+        #self.debug('event : %s' % event)
+        if event:
+            self.queueEvent(event)
 
-            
-    def call_func(self, func, eventType, eventData):
-        if hasattr(self, func):
-            #self.verbose2('routing ----> %s(%r)' % (func,eventData))
-            func = getattr(self, func)
-            event = func(eventType, eventData)
-            #self.debug('event : %s' % event)
-            if event:
-                self.queueEvent(event)
-            
-        elif eventType in self._eventMap:
-            self.queueEvent(b3.events.Event(
-                    self._eventMap[eventType],
-                    eventData))
-        else:
-            data = ''
-            if func:
-                data = func + ' '
-            data += str(eventType) + ': ' + str(eventData)
-            self.warning('TODO : handle \'%r\' battleye events' % eventData)
-            self.queueEvent(b3.events.Event(b3.events.EVT_UNKNOWN, data))
-
-        
-    def routeBattleyeResponsePacket(self, packet):
-        '''
-        Join together packets to get the complete server response
-        '''
-        self.debug('Responsepacket is %s' % packet)
-        eventType = ''
-        eventData = ''
-        func = ''
-        if packet[0:1] == chr(0):
-            # we have a Multipacket response
-            total_packets = ord(packet[1])
-            this_packet = ord(packet[2])
-
-            self._multi_packet_response[this_packet] = packet[3:]
-            if this_packet == total_packets - 1:
-                packet = ''
-                for p in range(0, total_packets):
-                    if len(self._multi_packet_response[p]):
-                        packet = packet + self._multi_packet_response[p]
-                    else:
-                        self.debug('Part of Multi packet response is missing')
-                        for pp in range(0, total_packets-1):
-                            self._multi_packet_response[pp] = ''
-                        return
-                # Packet reconstituted, so delete segments
-                for pp in range(0, total_packets-1):
-                    self._multi_packet_response[pp] = ''
-                
-            else:
-                return
-
-        message = self.processPacketfromserver(packet)
-        if message[0:18] == 'Players on server:':
-            func = 'OnPlayerList'        
-            self.debug('Found playerlist')
-            eventData = message
-        elif message[0:10] == 'GUID Bans:':
-            func = 'OnBanList'
-            self.debug('Got Bans List')
-            eventData = message
-        elif message == 'Unknown command':
-            self.debug('Server recieved an Unknown command from us')
-        else:
-            self.debug('Unhandled server response %s' % message)
-
-        if func:
-            self.call_func(func, eventType, eventData)
-        
 
     def startup(self):
 
@@ -440,28 +359,31 @@ class AbstractParser(b3.parser.Parser):
         self.load_config_message_delay()
 
         self.start_sayqueue_worker()
-        # start crontab to trigger playerlist events
-        self.cron + b3.cron.CronTab(self.clients.sync, minute='*/1')
         self.clients.newClient('Server', guid='Server', name='Server', hide=True, pbid='Server', team=b3.TEAM_UNKNOWN, squad=None)
+
 
     def pluginsStarted(self):
         # self.patch_b3_admin_plugin()
         return
-        
+
+
     def sayqueuelistener_worker(self):
         self.info("sayqueuelistener job started")
         while self.working:
             try:
-                msg = self.sayqueue.get(timeout=40)
-                for line in self.getWrap(self.stripColors(self.msgPrefix + ' ' + msg), self._settings['line_length'], self._settings['min_wrap_length']):
-                    self.write(self.getCommand('say', message=line))
-                    time.sleep(self._settings['message_delay'])
+                self._say(self.sayqueue.get(timeout=40))
             except Queue.Empty:
                 self.verbose2("sayqueuelistener: had nothing to do in the last 40 sec")
             except Exception, err:
-                self.info("sayqueuelistener Error")
-                
+                self.info("sayqueuelistener Error", exc_info=err)
         self.info("sayqueuelistener job ended")
+
+
+    def _say(self, msg):
+        for line in self.getWrap(self.stripColors(self.msgPrefix + ' ' + msg), self._settings['line_length'], self._settings['min_wrap_length']):
+            self.write(self.getCommand('say', message=line))
+            time.sleep(self._settings['message_delay'])
+
 
     def start_sayqueue_worker(self):
         self.sayqueuelistener = threading.Thread(target=self.sayqueuelistener_worker)
@@ -486,62 +408,24 @@ class AbstractParser(b3.parser.Parser):
         result = tuple(preparedcmd)
         self.debug('getCommand: %s', result)
         return result
-    
-    def write(self, msg, maxRetries=1, needConfirmation=False):
+
+
+    def write(self, msg, *args, **kwargs):
         """Write a message to Rcon/Console
-        Unfortunaltely this has been abused all over B3 
+        Unfortunately this has been abused all over B3
         and B3 plugins to broadcast text :(
         """
-        if type(msg) == str:
+        if isinstance(msg, basestring):
             # console abuse to broadcast text
             self.say(msg)
         else:
             # Then we got a command, so unpack it
-            cmd = ''
-            for a in msg:
-                cmd = cmd + ' ' + a
-                
-            cmd = cmd.strip()
-                
+            cmd = ' '.join(msg).strip()
             if self.replay:
                 self.bot('Sent rcon message: %s' % cmd)
-            elif self.output is None:
-                pass
-            else:
-                res = self.output.write(cmd, maxRetries=maxRetries, needConfirmation=needConfirmation)
-                self.output.flush()
-                return res
-            
-    def getWrap(self, text, length=None, minWrapLen=None):
-        """Returns a sequence of lines for text that fits within the limits
-        """
-        if not text:
-            return []
+            elif self.output:
+                return self.output.write(cmd)
 
-        if length is None:
-            length = self._settings['line_length']
-
-        maxLength = int(length)
-        
-        if len(text) <= maxLength:
-            return [text]
-        else:
-            wrappoint = text[:maxLength].rfind(" ")
-            if wrappoint == 0:
-                wrappoint = maxLength
-            lines = [text[:wrappoint]]
-            remaining = text[wrappoint:]
-            while len(remaining) > 0:
-                if len(remaining) <= maxLength:
-                    lines.append(remaining)
-                    remaining = ""
-                else:
-                    wrappoint = remaining[:maxLength].rfind(" ")
-                    if wrappoint == 0:
-                        wrappoint = maxLength
-                    lines.append(remaining[0:wrappoint])
-                    remaining = remaining[wrappoint:]
-            return lines
 
     
     ###############################################################################################
@@ -551,15 +435,13 @@ class AbstractParser(b3.parser.Parser):
     ###############################################################################################
 
     
-    def OnPlayerChat(self, action, data):
+    def OnPlayerChat(self, data):
         """
         #(Lobby) Bravo17: hello b3'
         #(Global) Bravo17: global channel
 
         Player has sent a message to other players
         """
-        
-
         name, sep, message = data.partition(': ')
         self.debug('Name = %s, Message = %s Name length = %s' % (name, message, len(name)))
         
@@ -598,7 +480,7 @@ class AbstractParser(b3.parser.Parser):
         return b3.events.Event(event_type, text, client)
         
 
-    def OnPlayerLeave(self, action, data):
+    def OnPlayerLeave(self, data):
         """
         #Player #4 Kauldron disconnected
         Player has left the server
@@ -610,7 +492,8 @@ class AbstractParser(b3.parser.Parser):
             client.disconnect() # this triggers the EVT_CLIENT_DISCONNECT event
         return None
 
-    def OnPlayerConnected(self, action, data):
+
+    def OnPlayerConnected(self, data):
         """
         # Player #0 Bravo17 (76.108.91.78:2304)
         Initial player connect message received
@@ -623,7 +506,7 @@ class AbstractParser(b3.parser.Parser):
         self.getClient(cid=cid, name=name, ip=ip) # fires EVT_CLIENT_CONNECTED
 
 
-    def OnUnverifiedGUID(self, action, data):
+    def OnUnverifiedGUID(self, data):
         """
         #Player #0 Bravo17 - GUID: 80a5885ebe2420bab5e158a310fcbc7d (unverified)
         Players GUID has been found but not verified, no action to take
@@ -632,12 +515,11 @@ class AbstractParser(b3.parser.Parser):
         return None
         
 
-    def OnVerifiedGUID(self, action, data):
+    def OnVerifiedGUID(self, data):
         """
         #Verified GUID  (80a5885ebe2420bab5e158a310fcbc7d) of player #0 Bravo17
         Players GUID has been verified, auth player
         """
-
         guid = data.partition(')')[0]
         data = data .partition('#')[2]
         cid, sep, name = data.partition(' ')
@@ -653,7 +535,8 @@ class AbstractParser(b3.parser.Parser):
         else:
             self.warning("could not create client")
 
-    def OnServerMessage(self, action, data):
+
+    def OnServerMessage(self, data):
         """
         Request: Message from Server
         Effect: None, no messages from server are relevant
@@ -664,22 +547,8 @@ class AbstractParser(b3.parser.Parser):
         #pass
         return
         
-    def OnPlayerList(self, action, data):
-        """
-        Puts the playerlist in an array for getPlayerList to retrieve'
-        """
-        self.debug('Playerlist retrieved')
-        self._player_list_from_server = data
 
-        
-    def OnBanList(self, action, data):
-        """
-        Puts the banlist in an array for unban to retrieve'
-        """
-        self._ban_list_from_server = data
-        
-        
-    def OnBattleyeKick(self, action, data):
+    def OnBattleyeKick(self, data):
         """
         #Player #2 NZ (04b81a0bd914e7ba610ef3c0ffd66a1a) has been kicked by BattlEye: Script Restriction #107'
         Player has been kicked by Battleye
@@ -693,8 +562,9 @@ class AbstractParser(b3.parser.Parser):
         client = self.getClient(name, guid=guid, auth=False)
         if client: 
             client.disconnect() # this triggers the EVT_CLIENT_DISCONNECT event
-        
-    def OnUnknownEvent(self, action, data):
+
+
+    def OnUnknownEvent(self, data):
         return False
 
 
@@ -723,43 +593,19 @@ class AbstractParser(b3.parser.Parser):
             client = self.clients.newClient(cid, guid=guid, name=name, ip=ip)
         return client
     
-#Players on server:\n
-#[#] [IP Address]:[Port] [Ping] [GUID] [Name]\n--------------------------------------------------\n
-#0   76.108.91.78:2304     63   80a5885ebe2420bab5e158a310fcbc7d(OK) Bravo17\n
-#0   192.168.0.100:2316    0    80a5885ebe2420bab5e158a310fcbc7d(OK) Bravo17 (Lobby)\n
-#(1 players in total)'
+
     
     
     def getPlayerList(self, maxRetries=None):
         """return a dict which keys are cid and values a dict of player properties
         as returned by admin.listPlayers.
         Does not return client objects"""
-        while self._server_response_lock:
-            time.sleep(0.5)
-        self._server_response_lock = True
-        self.write(('players', ))
-        timeout_time = time.time() + self._server_response_timeout
-        while not self._player_list_from_server and time.time() < timeout_time:
-            self.verbose2('Waiting for player list')
-            time.sleep(0.1)
-        
-        if self._player_list_from_server:
-            self.debug('Got player list')
-            self._previous_player_list_from_server = self._player_list_from_server
-            self._player_list_errors = 0
-        else:
-            self.debug("using previous player list")
-            self._player_list_errors += 1
-            self._player_list_from_server = self._previous_player_list_from_server
-        self._server_response_lock = False
-        
-        if self._player_list_errors > 5:
-            self._player_list_errors = 0
-            self.debug('Too many player list errors - shutting down connection')
-            self.close_battleye_connection()
-        
-        player_list = self._player_list_from_server.splitlines()
-        self._player_list_from_server = ''
+        #Players on server:\n
+        #[#] [IP Address]:[Port] [Ping] [GUID] [Name]\n--------------------------------------------------\n
+        #0   76.108.91.78:2304     63   80a5885ebe2420bab5e158a310fcbc7d(OK) Bravo17\n
+        #0   192.168.0.100:2316    0    80a5885ebe2420bab5e158a310fcbc7d(OK) Bravo17 (Lobby)\n
+        #(1 players in total)'
+        player_list = self.output.write("players").splitlines()
         self.debug('Playerlist is %s' % player_list)
         self.debug('Playerlist is %s long' % (len(player_list)-4))
         players = {}
@@ -856,8 +702,10 @@ class AbstractParser(b3.parser.Parser):
         
         return mlist
 
+
     def say(self, msg):
-        self.sayqueue.put(self.stripColors(msg))
+        self.sayqueue.put(msg)
+
 
     def saybig(self, msg):
         """\
@@ -888,16 +736,9 @@ class AbstractParser(b3.parser.Parser):
 
 
     def message(self, client, text):
-        try:
-            if client is None:
-                self.say(self.stripColors(text))
-            elif client.cid is None:
-                pass
-            else:
-                cmd_name = 'bigmessage' if self._settings['big_b3_private_responses'] else 'message'
-                self.write(self.getCommand(cmd_name, message=self.stripColors(text), cid=client.cid, big_msg_duration=int(float(self._settings['big_msg_duration']))))
-        except Exception, err:
-            self.warning(err)
+        if client:
+            for line in self.getWrap(self.stripColors(self.msgPrefix + ' ' + text), self._settings['line_length'], self._settings['min_wrap_length']):
+                self.write(self.getCommand('message', cid=client.cid, message=line))
 
 
     def ban(self, client, reason='', admin=None, silent=False, *kwargs):
@@ -914,29 +755,26 @@ class AbstractParser(b3.parser.Parser):
         fullreason = self.stripColors(fullreason)
         reason = self.stripColors(reason)
 
-        if self.ban_with_server:
-            if client.cid is None:
-                # ban by guid, this happens when we !permban @xx a player that is not connected
-                self.debug('EFFECTIVE BAN : %s',self.getCommand('banByGUID', guid=client.guid, reason=reason[:80]))
-                try:
-                    self.write(self.getCommand('banByGUID', guid=client.guid, reason=reason[:80]))
-                    self.debug(self.getCommand('banByGUID', guid=client.guid, reason=reason[:80]))
-                    self.write(('writeBans',))
-                    if admin:
-                        admin.message('banned: %s (@%s) has been added to banlist' % (client.exactName, client.id))
-                except CommandFailedError, err:
-                    self.error(err)
-            else:
-                # ban by cid
-                self.debug('EFFECTIVE BAN : %s',self.getCommand('ban', cid=client.cid, reason=reason[:80]))
-                try:
-                    #self.write(self.getCommand('ban', cid=client.cid, reason=reason[:80]))
-                    self.debug(self.getCommand('ban', cid=client.cid, reason=reason[:80]))
-                    self.write(('writeBans',))
-                    if admin:
-                        admin.message('banned: %s (@%s) has been added to banlist' % (client.exactName, client.id))
-                except CommandFailedError, err:
-                    self.error(err)
+        if client.cid is None:
+            # ban by guid, this happens when we !permban @xx a player that is not connected
+            self.debug('EFFECTIVE BAN : %s',self.getCommand('banByGUID', guid=client.guid, reason=reason[:80]))
+            try:
+                self.write(self.getCommand('banByGUID', guid=client.guid, reason=reason[:80]))
+                self.write(('writeBans',))
+                if admin:
+                    admin.message('banned: %s (@%s) has been added to banlist' % (client.exactName, client.id))
+            except CommandFailedError, err:
+                self.error(err)
+        else:
+            # ban by cid
+            self.debug('EFFECTIVE BAN : %s',self.getCommand('ban', cid=client.cid, reason=reason[:80]))
+            try:
+                self.write(self.getCommand('ban', cid=client.cid, reason=reason[:80]))
+                self.write(('writeBans',))
+                if admin:
+                    admin.message('banned: %s (@%s) has been added to banlist' % (client.exactName, client.id))
+            except CommandFailedError, err:
+                self.error(err)
 
         
         if not silent and fullreason != '':
@@ -946,51 +784,30 @@ class AbstractParser(b3.parser.Parser):
 
 
     def unban(self, client, reason='', admin=None, silent=False, *kwargs):
-        #'unban': ('removeBan', '%(ban_no)s'),
-        #GUID Bans:
-        #[#] [GUID] [Minutes left] [Reason]
-        #----------------------------------------
-        #0  b57cb4973da76f4588936416aae2de05 perm Script Detection: Gerk
-        #1  8ac69e7189ecd2ff4235142feff0bd26 perm Script Detection: setVehicleInit DoThis;
-
-        self.debug('UNBAN: Name: %s, Ip: %s, Guid: %s' %(client.name, client.ip, client.guid))
-        while self._server_response_lock:
-            time.sleep(0.5)
-        self._server_response_lock = True
-        self.write( ('bans',) )
-        timeout_time = time.time() + self._server_response_timeout
-        while not self._ban_list_from_server and time.time() < timeout_time:
-            self.debug('Waiting for ban list')
-            time.sleep(0.1)
-        self._server_response_lock = False
-        
-        if self._ban_list_from_server:
-            self.debug('Got ban list')
-        else:
-            admin.message('Failed to get ban list in time')
+        if not client or not client.guid:
             return
-        ban_list = self._ban_list_from_server.splitlines()
-        self._ban_list_from_server = ''
-        ban_no_list = []
-        for line in ban_list:
-            if client.guid in line:
-                ban_no = line.partition(' ')[0]
-                ban_no_list.append(ban_no)
-        
-        if ban_no_list:
-            for ban_no in ban_no_list:
-                try:
-                    self.write(self.getCommand('unban', ban_no=ban_no, reason=reason), needConfirmation=True)
-                    #self.verbose(response)
-                    self.verbose('UNBAN: Removed ban (%s) guid from banlist' % ban_no)
-                    if admin:
-                        admin.message('Unbanned: Removed %s guid from banlist' % client.exactName)
-                except CommandFailedError, err:
-                    if "NotInList" in err.message:
-                        pass
-                    else:
-                        raise
+        bans = self.getBanlist()
+        if not client.guid in bans:
+            if admin:
+                admin.message("%s guid not found in banlist" % client.guid)
+            return
+
+        ban_entry = bans[client.guid]
+        self.debug('UNBAN: ban index: %s, Name: %s, Guid: %s' %(ban_entry['ban_index'], client.name, client.guid))
+        try:
+            self.write(self.getCommand('unban', ban_no=ban_entry['ban_index'], reason=reason))
             self.write(('writeBans',))
+            #self.verbose(response)
+            self.verbose('UNBAN: Removed ban (%s) guid from banlist' % ban_entry['ban_index'])
+            if admin:
+                admin.message('Unbanned: Removed %s guid from banlist' % client.exactName)
+        except CommandFailedError, err:
+            if "NotInList" in err.message:
+                if admin:
+                    admin.message("ban not found in banlist")
+            else:
+                raise
+
 
     def tempban(self, client, reason='', duration=2, admin=None, silent=False, *kwargs):
         #'tempban': ('ban ', '%(cid)s', '%(duration)d', '%(reason)s'),
@@ -1007,26 +824,25 @@ class AbstractParser(b3.parser.Parser):
         fullreason = self.stripColors(fullreason)
         reason = self.stripColors(reason)
 
-        if self.ban_with_server:
-            if client.cid is None:
-                # ban by guid, this happens when we !tempban @xx a player that is not connected
-                try:
-                    self.write(self.getCommand('tempbanByGUID', guid=client.guid, duration=duration, reason=reason[:80]))
-                    self.write(('writeBans',))
-                except CommandFailedError, err:
-                    if admin:
-                        admin.message("server replied with error %s" % err.message[0])
-                    else:
-                        self.error(err)
-            else:
-                try:
-                    self.write(self.getCommand('tempban', cid=client.cid, duration=duration, reason=reason[:80]))
-                    self.write(('writeBans',))
-                except CommandFailedError, err:
-                    if admin:
-                        admin.message("server replied with error %s" % err.message[0])
-                    else:
-                        self.error(err)
+        if client.cid is None:
+            # ban by guid, this happens when we !tempban @xx a player that is not connected
+            try:
+                self.write(self.getCommand('tempbanByGUID', guid=client.guid, duration=duration, reason=reason[:80]))
+                self.write(('writeBans',))
+            except CommandFailedError, err:
+                if admin:
+                    admin.message("server replied with error %s" % err.message[0])
+                else:
+                    self.error(err)
+        else:
+            try:
+                self.write(self.getCommand('tempban', cid=client.cid, duration=duration, reason=reason[:80]))
+                self.write(('writeBans',))
+            except CommandFailedError, err:
+                if admin:
+                    admin.message("server replied with error %s" % err.message[0])
+                else:
+                    self.error(err)
 
         if not silent and fullreason != '':
             self.say(fullreason)
@@ -1064,9 +880,21 @@ class AbstractParser(b3.parser.Parser):
 
         
     def getPlayerPings(self):
-        """Ask the server for a given client's pings
-        """
-        pass
+        """Ask the server for all clients' pings"""
+        #Players on server:
+        #[#] [IP Address]:[Port] [Ping] [GUID] [Name]\n--------------------------------------------------
+        #0   76.108.91.78:2304     63   80a5885ebe2420bab5e158a310fcbc7d(OK) Bravo17
+        #0   192.168.0.100:2316    0    80a5885ebe2420bab5e158a310fcbc7d(OK) Bravo17 (Lobby)
+        #(1 players in total)
+        pings = {}
+        player_list = self.output.write("players")
+        for m in re.finditer(self.re_playerlist, player_list):
+            if not m.group('lobby'):
+                try:
+                    pings[m.group('cid')] = int(m.group('ping'))
+                except ValueError:
+                    pass
+        return pings
 
 
     def getPlayerScores(self):
@@ -1094,6 +922,19 @@ class AbstractParser(b3.parser.Parser):
     #    Other methods
     #    
     ###############################################################################################
+
+    def getBanlist(self):
+        #GUID Bans:
+        #[#] [GUID] [Minutes left] [Reason]
+        #----------------------------------------
+        #0  b57cb4973da76f4588936416aae2de05 perm Script Detection: Gerk
+        #1  8ac69e7189ecd2ff4235142feff0bd26 perm Script Detection: setVehicleInit DoThis;
+        bans = {}
+        raw_bans = self.output.write("bans")
+        for m in re.finditer(r'''^\s*(?P<ban_index>\d+)\s+(?P<guid>[a-fA-F0-9]+)\s+(?P<min_left>\S+)\s+(?P<reason>.*)$''', raw_bans, re.MULTILINE):
+            bans[m.group('guid')] = m.groupdict()
+        return bans
+
 
 
     def load_conf_max_say_line_length(self):
@@ -1171,75 +1012,37 @@ class AbstractParser(b3.parser.Parser):
         sys.exit(221)
 
 
-    def processPacketfromserver(self, packet):
-        return packet.decode("UTF-8")
+    def getWrap(self, text, length=None, minWrapLen=None):
+        """Returns a sequence of lines for text that fits within the limits
+        """
+        if not text:
+            return []
 
+        if length is None:
+            length = self._settings['line_length']
 
+        maxLength = int(length)
 
-
-#############################################################
-# Below is the code that changes a bit the b3.clients.Client
-# class at runtime. What the point of coding in python if we
-# cannot play with its dynamic nature ;)
-#
-# why ?
-# because doing so make sure we're not broking any other
-# working and long tested parser. The changes we make here
-# are only applied when the battleye parser is loaded.
-#############################################################
-
-## change the auth method in the Client class
-
-def battleyeClientAuthMethod(self):
-    if not self.authed and self.guid and not self.authorizing:
-        self.authorizing = True
-
-        name = self.name
-        ip = self.ip
-        try:
-            inStorage = self.console.storage.getClient(self)
-        except KeyError, msg:
-            self.console.debug('User not found %s: %s', self.guid, msg)
-            inStorage = False
-        except Exception, e:
-            self.console.error('auth self.console.storage.getClient(client) - %s\n%s', e, traceback.extract_tb(sys.exc_info()[2]))
-            self.authorizing = False
-            return False
-
-        #lastVisit = None
-        if inStorage:
-            self.console.bot('Client found in storage %s, welcome back %s', str(self.id), self.name)
-            self.lastVisit = self.timeEdit
+        if len(text) <= maxLength:
+            return [text]
         else:
-            self.console.bot('Client not found in the storage %s, create new', str(self.guid))
+            wrappoint = text[:maxLength].rfind(" ")
+            if wrappoint == 0:
+                wrappoint = maxLength
+            lines = [text[:wrappoint]]
+            remaining = text[wrappoint:]
+            while len(remaining) > 0:
+                if len(remaining) <= maxLength:
+                    lines.append(remaining)
+                    remaining = ""
+                else:
+                    wrappoint = remaining[:maxLength].rfind(" ")
+                    if wrappoint == 0:
+                        wrappoint = maxLength
+                    lines.append(remaining[0:wrappoint])
+                    remaining = remaining[wrappoint:]
+            return lines
 
-        self.connections = int(self.connections) + 1
-        self.name = name
-        self.ip = ip
-        self.save()
-        self.authed = True
 
-        # Allow for non-ascii names
-        self.console.debug('Client Authorized: [%s] %r - %s', self.cid, self.name, self.guid)
 
-        # check for bans
-        if self.numBans > 0:
-            ban = self.lastBan
-            if ban:
-                self.reBan(ban)
-                self.authorizing = False
-                return False
 
-        self.refreshLevel()
-
-        self.console.queueEvent(b3.events.Event(b3.events.EVT_CLIENT_AUTH,
-            self,
-            self))
-
-        self.authorizing = False
-
-        return self.authed
-    else:
-        return False
-
-b3.clients.Client.auth = battleyeClientAuthMethod

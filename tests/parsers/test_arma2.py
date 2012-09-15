@@ -17,9 +17,8 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #
-import time
 import unittest2 as unittest
-from mock import Mock, patch
+from mock import Mock, patch, call
 from mockito import when
 from b3.fake import FakeClient
 from b3.parsers.arma2 import Arma2Parser
@@ -128,7 +127,7 @@ class Test_game_events_parsing(EventParsingTestCase):
         # GIVEN
         self.clear_events()
         # WHEN
-        self.parser.routeBattleyeMessagePacket("""Player #0 Bravo17 (76.108.91.78:2304) connected""")
+        self.parser.routeBattleyeEvent("""Player #0 Bravo17 (76.108.91.78:2304) connected""")
         # THEN
         self.assertEqual(1, len(self.evt_queue))
         event = self.evt_queue[0]
@@ -144,7 +143,7 @@ class Test_game_events_parsing(EventParsingTestCase):
         bravo17.connects("0")
         self.clear_events()
         # WHEN
-        self.parser.routeBattleyeMessagePacket("""Verified GUID (80a5885ebe2420bab5e158a310fcbc7d) of player #0 Bravo17""")
+        self.parser.routeBattleyeEvent("""Verified GUID (80a5885ebe2420bab5e158a310fcbc7d) of player #0 Bravo17""")
         # THEN
         self.assert_has_event("EVT_CLIENT_AUTH", data=bravo17, client=bravo17)
 
@@ -153,7 +152,7 @@ class Test_game_events_parsing(EventParsingTestCase):
         # GIVEN
         self.clear_events()
         # WHEN
-        self.parser.routeBattleyeMessagePacket("""Verified GUID (80a5885ebe2420bab5e158a310fcbc7d) of player #0 Bravo17""")
+        self.parser.routeBattleyeEvent("""Verified GUID (80a5885ebe2420bab5e158a310fcbc7d) of player #0 Bravo17""")
         # THEN
         self.assertTrue(len(self.evt_queue))
         event = self.evt_queue[0]
@@ -170,7 +169,7 @@ class Test_game_events_parsing(EventParsingTestCase):
         bravo17.connects("12")
         self.clear_events()
         # WHEN
-        self.parser.routeBattleyeMessagePacket("""Player #12 Bravo17 disconnected""")
+        self.parser.routeBattleyeEvent("""Player #12 Bravo17 disconnected""")
         # THEN
         self.assert_has_event("EVT_CLIENT_DISCONNECT", client=bravo17, data='12')
 
@@ -181,7 +180,7 @@ class Test_game_events_parsing(EventParsingTestCase):
         bravo17.connects("12")
         self.clear_events()
         # WHEN
-        self.parser.routeBattleyeMessagePacket("""(Lobby) Bravo17: hello b3""")
+        self.parser.routeBattleyeEvent("""(Lobby) Bravo17: hello b3""")
         # THEN
         self.assert_has_event("EVT_CLIENT_SAY", client=bravo17, data='hello b3 (Lobby)')
 
@@ -192,7 +191,7 @@ class Test_game_events_parsing(EventParsingTestCase):
         bravo17.connects("12")
         self.clear_events()
         # WHEN
-        self.parser.routeBattleyeMessagePacket("""(Global) Bravo17: global channel""")
+        self.parser.routeBattleyeEvent("""(Global) Bravo17: global channel""")
         # THEN
         self.assert_has_event("EVT_CLIENT_SAY", client=bravo17, data='global channel (Global)')
 
@@ -203,7 +202,7 @@ class Test_game_events_parsing(EventParsingTestCase):
         bravo17.connects("12")
         self.clear_events()
         # WHEN
-        self.parser.routeBattleyeMessagePacket("""(Direct) Bravo17: test direct channel""")
+        self.parser.routeBattleyeEvent("""(Direct) Bravo17: test direct channel""")
         # THEN
         self.assert_has_event("EVT_CLIENT_SAY", client=bravo17, data='test direct channel (Direct)')
 
@@ -214,7 +213,7 @@ class Test_game_events_parsing(EventParsingTestCase):
         bravo17.connects("12")
         self.clear_events()
         # WHEN
-        self.parser.routeBattleyeMessagePacket("""(Vehicle) Bravo17: test vehicle channel""")
+        self.parser.routeBattleyeEvent("""(Vehicle) Bravo17: test vehicle channel""")
         # THEN
         self.assert_has_event("EVT_CLIENT_SAY", client=bravo17, data='test vehicle channel (Vehicle)')
 
@@ -225,7 +224,7 @@ class Test_game_events_parsing(EventParsingTestCase):
         bravo17.connects("12")
         self.clear_events()
         # WHEN
-        self.parser.routeBattleyeMessagePacket("""(Group) Bravo17: test group channel""")
+        self.parser.routeBattleyeEvent("""(Group) Bravo17: test group channel""")
         # THEN
         self.assert_has_event("EVT_CLIENT_SAY", client=bravo17, data='test group channel (Group)')
 
@@ -236,7 +235,7 @@ class Test_game_events_parsing(EventParsingTestCase):
         bravo17.connects("12")
         self.clear_events()
         # WHEN
-        self.parser.routeBattleyeMessagePacket("""(Side) Bravo17: test side channel""")
+        self.parser.routeBattleyeEvent("""(Side) Bravo17: test side channel""")
         # THEN
         self.assert_has_event("EVT_CLIENT_SAY", client=bravo17, data='test side channel (Side)')
 
@@ -247,7 +246,7 @@ class Test_game_events_parsing(EventParsingTestCase):
         bravo17.connects("12")
         self.clear_events()
         # WHEN
-        self.parser.routeBattleyeMessagePacket("""(Command) Bravo17: test command channel""")
+        self.parser.routeBattleyeEvent("""(Command) Bravo17: test command channel""")
         # THEN
         self.assert_has_event("EVT_CLIENT_SAY", client=bravo17, data='test command channel (Command)')
 
@@ -258,7 +257,7 @@ class Test_utf8_issues(EventParsingTestCase):
         # GIVEN
         self.clear_events()
         # WHEN routeBattleyeMessagePacket is given a UTF-8 encoded message
-        self.parser.routeBattleyeMessagePacket(u"""Player #0 F00Åéxx (11.1.1.8:2304) connected""".encode("UTF-8"))
+        self.parser.routeBattleyeEvent(u"""Player #0 F00Åéxx (11.1.1.8:2304) connected""")
         # THEN
         self.assertEqual(1, len(self.evt_queue))
         event = self.evt_queue[0]
@@ -270,7 +269,7 @@ class Test_utf8_issues(EventParsingTestCase):
         # GIVEN
         self.clear_events()
         # WHEN
-        self.parser.routeBattleyeMessagePacket(u'Player #1 étoiléàtèsté (77.205.193.131:2304) connected'.encode('UTF-8'))
+        self.parser.routeBattleyeEvent(u'Player #1 étoiléàtèsté (77.205.193.131:2304) connected')
         # THEN
         self.assertEqual(1, len(self.evt_queue))
         event = self.evt_queue[0]
@@ -282,7 +281,7 @@ class Test_utf8_issues(EventParsingTestCase):
         # GIVEN
         self.clear_events()
         # WHEN
-        self.parser.routeBattleyeMessagePacket(u'Verified GUID (a4c3eba0a790300fd7d9d39e26e00eb0) of player #1 étoiléàtèsté'.encode("UTF-8"))
+        self.parser.routeBattleyeEvent(u'Verified GUID (a4c3eba0a790300fd7d9d39e26e00eb0) of player #1 étoiléàtèsté')
         # THEN
         self.assertTrue(len(self.evt_queue))
         event = self.evt_queue[0]
@@ -291,22 +290,34 @@ class Test_utf8_issues(EventParsingTestCase):
 
 
 
-class Test_getPlayerList(EventParsingTestCase):
 
-    def test_one_player_connected_plus_one_in_lobby(self):
+
+@patch('time.sleep')
+class Test_parser_API(Arma2TestCase):
+
+    def setUp(self):
+        self.conf = XmlConfigParser()
+        self.conf.loadFromString("""<configuration></configuration>""")
+        self.parser = Arma2Parser(self.conf)
+        self.parser.output = Mock()
+
+        self.parser.sayqueue.put = Mock(side_effect=self.parser._say)
+
+        self.parser.startup()
+
+        self.player = self.parser.clients.newClient(cid="4", guid="theGuid", name="theName", ip="11.22.33.44")
+
+
+    def test_getPlayerList(self, sleep_mock):
         # GIVEN
-        def write(*args, **kwargs):
-            if args[0] == ('players',):
-                self.parser.routeBattleyeResponsePacket(u'''\
+        when(self.parser.output).write('players').thenReturn(u'''\
 Players on server:
 [#] [IP Address]:[Port] [Ping] [GUID] [Name]
 --------------------------------------------------
 0   11.111.11.11:2304     63   80a5885eb00000000000000000000000(OK) étoiléàÄ
 0   192.168.0.100:2316    0    80a5885eb00000000000000000000000(OK) étoiléàÄ (Lobby)
 (1 players in total)
-'''.encode("UTF-8"))
-        self.write_mock.side_effect = write
-        self.clear_events()
+''')
         # WHEN
         players = self.parser.getPlayerList()
         # THEN
@@ -321,3 +332,142 @@ Players on server:
                                      'verified': u'OK'}}, players)
 
 
+    def test_say(self, sleep_mock):
+        # GIVEN
+        self.parser.msgPrefix = "[Pre]"
+        # WHEN
+        self.parser.say("f00")
+        # THEN
+        self.parser.output.write.assert_has_calls([call('say -1 [Pre] f00')])
+
+
+    def test_saybig(self, sleep_mock):
+        # GIVEN
+        self.parser.msgPrefix = "[Pre]"
+        # WHEN
+        self.parser.saybig("f00")
+        # THEN
+        self.parser.output.write.assert_has_calls([call('say -1 [Pre] f00')])
+
+
+    def test_message(self, sleep_mock):
+        # GIVEN
+        self.parser.msgPrefix = "[Pre]"
+        # WHEN
+        self.parser.message(self.player, "f00")
+        # THEN
+        self.parser.output.write.assert_has_calls([call('say 4 [Pre] f00')])
+
+
+    def test_kick(self, sleep_mock):
+        self.parser.kick(self.player, reason="f00")
+        self.parser.output.write.assert_has_calls([call('kick 4 f00')])
+
+
+    def test_ban__by_cid(self, sleep_mock):
+        self.assertIsNotNone(self.player.cid)
+        self.parser.ban(self.player, reason="f00")
+        self.parser.output.write.assert_has_calls([call('ban 4 0 f00'), call('writeBans')])
+
+
+    def test_ban__by_guid(self, sleep_mock):
+        self.player.cid = None
+        self.assertIsNone(self.player.cid)
+        self.parser.ban(self.player, reason="f00")
+        self.parser.output.write.assert_has_calls([call('addBan theGuid 0 f00'), call('writeBans')])
+
+
+    def test_unban(self, sleep_mock):
+        # GIVEN
+        self.player.cid = None
+        self.assertIsNone(self.player.cid)
+        when(self.parser).getBanlist().thenReturn({
+            'theGuid': {'ban_index': '152', 'guid': 'theGuid', 'reason': 'the ban reason', 'min_left': 'perm'},
+            })
+        # WHEN
+        self.parser.unban(self.player, reason="f00")
+        # THEN
+        self.parser.output.write.assert_has_calls([call('removeBan 152'), call('writeBans')])
+
+
+    def test_tempban__by_cid(self, sleep_mock):
+        self.assertIsNotNone(self.player.cid)
+        self.parser.tempban(self.player, reason="f00", duration='2h')
+        self.parser.output.write.assert_has_calls([call('ban 4 120 f00'),
+                                                   call('writeBans')])
+
+
+    def test_tempban__by_guid(self, sleep_mock):
+        self.player.cid = None
+        self.assertIsNone(self.player.cid)
+        self.parser.tempban(self.player, reason="f00", duration='2h')
+        self.parser.output.write.assert_has_calls([call('addBan theGuid 120 f00'),
+                                                   call('writeBans')])
+
+#
+#    def test_getMap(self, sleep_mock):
+#        pass
+#
+#
+#    def test_getMaps(self, sleep_mock):
+#        pass
+#
+#
+#    def test_rotateMap(self, sleep_mock):
+#        pass
+#
+#
+#    def test_changeMap(self, sleep_mock):
+#        pass
+
+
+    def test_getPlayerPings(self, sleep_mock):
+        # GIVEN
+        when(self.parser.output).write('players').thenReturn(u'''\
+Players on server:
+[#] [IP Address]:[Port] [Ping] [GUID] [Name]
+--------------------------------------------------
+0   76.108.91.78:2304     63   80a5885ebe2420bab5e158a310fcbc7d(OK) Bravo17
+0   192.168.0.100:2316    0    80a5885ebe2420bab5e158a310fcbc7d(OK) Bravo17 (Lobby)
+2   111.22.3.4:2316       47   80a50000000000000000000000fcbc7d(?)  bob
+(1 players in total)
+''')
+        # WHEN
+        pings = self.parser.getPlayerPings()
+        # THEN
+        self.maxDiff = 1024
+        self.assertDictEqual({u'0': 63, u'2': 47}, pings)
+
+#
+#    def test_getPlayerScores(self, sleep_mock):
+#        pass
+
+
+
+class test_others(Arma2TestCase):
+
+    def setUp(self):
+        self.conf = XmlConfigParser()
+        self.conf.loadFromString("""<configuration></configuration>""")
+        self.parser = Arma2Parser(self.conf)
+        self.parser.output = Mock()
+        self.parser.startup()
+        self.player = self.parser.clients.newClient(cid="4", guid="theGuid", name="theName", ip="11.22.33.44")
+
+
+    def test_getBanlist(self):
+        # GIVEN
+        self.maxDiff = 1024
+        when(self.parser.output).write("bans").thenReturn("""\
+GUID Bans:
+[#] [GUID] [Minutes left] [Reason]
+----------------------------------------
+0  b57c222222a76f458893641000000005 perm Script Detection: Gerk
+1  8ac61111111cd2ff4235140000000026 perm Script Detection: setVehicleInit DoThis;""")
+        # WHEN
+        rv = self.parser.getBanlist()
+        # THEN
+        self.assertDictEqual({
+            'b57c222222a76f458893641000000005': {'ban_index': '0', 'guid': 'b57c222222a76f458893641000000005', 'reason': 'Script Detection: Gerk', 'min_left': 'perm'},
+            '8ac61111111cd2ff4235140000000026': {'ban_index': '1', 'guid': '8ac61111111cd2ff4235140000000026', 'reason': 'Script Detection: setVehicleInit DoThis;', 'min_left': 'perm'},
+        }, rv)
