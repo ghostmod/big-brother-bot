@@ -16,7 +16,6 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #
-# Changelog :
 
 
 """
@@ -28,9 +27,10 @@ not require a separated socket connection for rcon commands
 To use that Rcon class, instantiate and use the set_battleye_server() method. 
 Then you can expect this class to work like the other Rcon classes
 """
+from b3.parsers.battleye.protocol import CommandError, CommandTimeoutError
 
 __author__  = 'Courgette'
-__version__ = '1.0'
+__version__ = '1.1'
 
 #--------------------------------------------------------------------------------------------------
 class Rcon:
@@ -46,10 +46,17 @@ class Rcon:
             self.write(line)
 
     def write(self, cmd, *args, **kwargs):
-        if not self.battleye_server:
+        if not self.battleye_server or not self.battleye_server.connected:
             return
-        self.console.verbose(u'RCON :\t %s' % repr(cmd))
-        response = self.battleye_server.command(cmd)
+        self.console.bot(u'RCON > %s' % repr(cmd))
+        response = None
+        try:
+            response = self.battleye_server.command(cmd)
+            self.console.bot(u'RCON < %s' % repr(response))
+        except CommandTimeoutError, err:
+            self.console.error("RCON # %s" % err)
+        except CommandError, err:
+            self.console.error("RCON ERROR : %s" % err, exc_info=err)
         return response
         
     def flush(self):

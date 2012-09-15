@@ -18,8 +18,8 @@
 # CHANGELOG
 
 
-__author__  = 'ThorN, xlr8or'
-__version__ = '0.1'
+__author__  = '82ndab-Bravo17'
+__version__ = '0.2'
 
 from b3.parsers.battleye.abstractParser import AbstractParser
 import b3
