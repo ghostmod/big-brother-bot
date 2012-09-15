@@ -126,7 +126,7 @@ class AbstractParser(b3.parser.Parser):
 
         server_logging = self.load_protocol_logging()
 
-        formatter = Formatter('"%(name)-15s [%(thread)-6d] %(threadName)-20s %(levelname)-8s %(message)s"')
+        formatter = Formatter('"%(name)-15s [%(thread)-6d] %(threadName)-20s %(levelname)-8s %(message)r"')
         ## the block below can activate additional logging for the BattleyeServer class
         if server_logging or b3_log_level == VERBOSE2:
             import logging
