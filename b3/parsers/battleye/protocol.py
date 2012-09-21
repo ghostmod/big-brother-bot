@@ -164,6 +164,7 @@ class BattleyeServer(Thread):
                                 seq = ord(data[8:9])
                                 self.getLogger().debug("Sent sequence was %s" % seq)
                                 self.sent_data_seq.append(seq)
+                time.sleep(.05)
             else:
                 self.stop()
         self.getLogger().debug("Ending Polling Thread")
