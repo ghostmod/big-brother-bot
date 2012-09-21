@@ -33,7 +33,9 @@
 #   - add prefix to say/saybig/message methods
 #   - implements getPlayerPings()
 #   - add method getBanlist()
-#
+# 09/20/1012    0.18
+#   - Make restart method work correctly when called from a plugin
+
 import sys, re, traceback, time, Queue, threading
 from logging import Formatter
 from b3.output import VERBOSE2, VERBOSE
@@ -45,7 +47,7 @@ import b3.cvar
 from b3.clients import Clients
 
 __author__  = '82ndab-Bravo17, Courgette'
-__version__ = '0.17'
+__version__ = '0.18'
 
 
 # disable the authorizing timer that come by default with the b3.clients.Clients class
@@ -126,7 +128,7 @@ class AbstractParser(b3.parser.Parser):
 
         server_logging = self.load_protocol_logging()
 
-        formatter = Formatter('"%(name)-15s [%(thread)-6d] %(threadName)-20s %(levelname)-8s %(message)r"')
+        formatter = Formatter('"%(asctime)s %(name)-15s [%(thread)-6d] %(threadName)-20s %(levelname)-8s %(message)r"')
         ## the block below can activate additional logging for the BattleyeServer class
         if server_logging or b3_log_level == VERBOSE2:
             import logging
@@ -176,27 +178,26 @@ class AbstractParser(b3.parser.Parser):
                 # unexpected exception, better close the battleye connection
                 self.close_battleye_connection()
 
-        #self._serverConnection.stop()
+        # The Battleye connection is running its own thread to communicate with the game server. We need to tell
+        # this thread to stop.
         self.close_battleye_connection()
         self.info("Stop listening for Battleye events")
-
+        self.output.battleye_server = None
+        
         # exiting B3
         with self.exiting:
             # If !die or !restart was called, then  we have the lock only after parser.handleevent Thread releases it
             # and set self.working = False and this is one way to get this code is executed.
             # Else there was an unhandled exception above and we end up here. We get the lock instantly.
 
-            self.output.battleye_server = None
-
-            # The Battleye connection is running its own thread to communicate with the game server. We need to tell
-            # this thread to stop.
-            self.close_battleye_connection()
 
             # If !die was called, exitcode have been set to 222
             # If !restart was called, exitcode have been set to 221
             # In both cases, the SystemExit exception that triggered exitcode to be filled with an exit value was
             # caught. Now that we are sure that everything was gracefully stopped, we can re-raise the SystemExit
             # exception.
+            self.debug('Exiting with exitcode of %s' % self.exitcode)
+            time.sleep(5)
             if self.exitcode:
                 sys.exit(self.exitcode)
 
@@ -359,6 +360,8 @@ class AbstractParser(b3.parser.Parser):
         self.load_config_message_delay()
 
         self.start_sayqueue_worker()
+        # start crontab to trigger playerlist events
+        self.cron + b3.cron.CronTab(self.clients.sync, minute='*/1')
         self.clients.newClient('Server', guid='Server', name='Server', hide=True, pbid='Server', team=b3.TEAM_UNKNOWN, squad=None)
 
 
@@ -987,30 +990,31 @@ class AbstractParser(b3.parser.Parser):
         try:
             if self.working and self.exiting.acquire():
                 self.bot('Shutting down...')
-                self.working = False
                 self.queueEvent(b3.events.Event(b3.events.EVT_STOP, None))
                 for k,plugin in self._plugins.items():
+                    self.debug('Stop event running for plugin %s' % plugin)
                     plugin.parseEvent(b3.events.Event(b3.events.EVT_STOP, ''))
+                self.bot('Stopping any cron jobs still running....')
                 if self._cron:
                     self._cron.stop()
 
                 self.bot('Shutting down database connections...')
                 self.storage.shutdown()
-                #self.exiting.release()
         except Exception, e:
             self.error(e)
 
             
     def restart(self):
         """Stop B3 with the restart exit status (221)"""
+        # Need to set this so that if restart is called from within a plugin, and there is no event, exitcode is correctly set
+        self.exitcode = 221
         self.shutdown()
 
         time.sleep(5)
 
         self.bot('Restarting...')
-        self.exitcode = 221
-        sys.exit(221)
 
+        sys.exit(221)
 
     def getWrap(self, text, length=None, minWrapLen=None):
         """Returns a sequence of lines for text that fits within the limits

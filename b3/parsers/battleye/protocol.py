@@ -28,6 +28,8 @@
 #   * make sending command synchronous (does not block receiving events though)
 #   * external functions subscribing will only be notified of BattlEye events (and won't receive command response packets)
 #   * CommandTimeoutError will be raised if a command does not get any response in a timely manner
+# 1.1.1 - 82ndab-Bravo17
+#   * correct race condition
 #
 import sys
 import logging
@@ -40,7 +42,7 @@ import Queue
 from collections import deque
 
 __author__ = '82ndab-Bravo17, Courgette'
-__version__ = '1.1'
+__version__ = '1.11'
 
 #####################################################################################
 #
@@ -164,6 +166,7 @@ class BattleyeServer(Thread):
                                 seq = ord(data[8:9])
                                 self.getLogger().debug("Sent sequence was %s" % seq)
                                 self.sent_data_seq.append(seq)
+                time.sleep(.05)
             else:
                 self.stop()
         self.getLogger().debug("Ending Polling Thread")
