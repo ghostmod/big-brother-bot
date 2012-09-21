@@ -360,6 +360,8 @@ class AbstractParser(b3.parser.Parser):
         self.load_config_message_delay()
 
         self.start_sayqueue_worker()
+        # start crontab to trigger playerlist events
+        self.cron + b3.cron.CronTab(self.clients.sync, minute='*/1')
         self.clients.newClient('Server', guid='Server', name='Server', hide=True, pbid='Server', team=b3.TEAM_UNKNOWN, squad=None)
 
 
