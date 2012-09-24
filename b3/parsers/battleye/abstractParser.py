@@ -622,7 +622,6 @@ class AbstractParser(b3.parser.Parser):
                     players[pl['cid']] = pl
                 elif pl['verified'] =='?':
                         self.debug('Player in Lobby GUID not yet verified: %s' % pl)
-                        del pl['guid']
                         players[pl['cid']] = pl
                 else:
                         self.debug('Player in Lobby GUID status unknown: %s' % pl)
@@ -636,7 +635,6 @@ class AbstractParser(b3.parser.Parser):
                         players[pl['cid']] = pl
                     elif pl['verified'] =='?':
                         self.debug('Player GUID not yet verified: %s' % pl)
-                        del pl['guid']
                         players[pl['cid']] = pl
                     else:
                         self.debug('Player GUID status unknown: %s' % pl)
@@ -663,11 +661,8 @@ class AbstractParser(b3.parser.Parser):
 
         for cid, c in plist.iteritems():
             client = self.clients.getByCID(cid)
+            c_guid = c.get('guid', None)
             if client:
-                try:
-                    c_guid = c['guid']
-                except:
-                    c_guid = None
                 if c_guid == client.guid:
                     self.debug('Client found on server %s' % client.name)
                     mlist[cid] = client
@@ -678,14 +673,28 @@ class AbstractParser(b3.parser.Parser):
                     elif client.team == self.getTeam('lobby') and not c['lobby']:
                         self.debug('Removing from Lobby')
                         client.team = self.getTeam('unknown')
-            
                 else:
                     # Wrong client in slot
                     self.debug('Removing %s from list' % client.name)
                     client.disconnect()
             else:
                 self.debug('Look for client in storage')
-                cl = self.getClient(c['name'], guid=c['guid'] if c['verified'] == 'OK' else None, cid=c['cid'], ip=c['ip'])
+                cl = None
+                if c_guid:
+                    c_verified = c.get('verified', None)
+                    c_ip = c.get('ip', None)
+                    if c_verified == 'OK':
+                        cl = self.getClient(c['name'], guid=c_guid, cid=c['cid'], ip=c_ip)
+                    elif c_ip:
+                        # case where guid is not verified but as we have an IP we can try to verify it ourselve
+                        client_matches = self.storage.getClientsMatching({'guid': c_guid, 'ip': c_ip})
+                        if len(client_matches) == 1:
+                            # assume that guid is OK as it matches a known client entry in database with that same IP
+                            cl = self.getClient(c['name'], guid=c_guid, cid=c['cid'], ip=c_ip)
+                        else:
+                            cl = self.getClient(c['name'], guid=None, cid=c['cid'], ip=c_ip)
+                    else:
+                        cl = self.getClient(c['name'], guid=None, cid=c['cid'], ip=c_ip)
                 if cl:
                     mlist[cid] = cl
                     

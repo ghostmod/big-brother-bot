@@ -443,6 +443,88 @@ Players on server:
 #        pass
 
 
+class test_sync(EventParsingTestCase):
+
+    def test_known_client_with_unverified_guid_but_same_ip_is_auth(self):
+        # GIVEN a known client Bob
+        bob = FakeClient(self.parser, name="bob", guid="80a50000000000000000000000fcbc7d", ip="111.22.3.4")
+        bob.save()
+        # WHEN
+        when(self.parser.output).write('players').thenReturn('''\
+Players on server:
+[#] [IP Address]:[Port] [Ping] [GUID] [Name]
+--------------------------------------------------
+2   111.22.3.4:2316       47   80a50000000000000000000000fcbc7d(?)  bob
+(1 players in total)
+''')
+        rv = self.parser.sync()
+        # THEN
+        self.assertIn('2', rv)
+        client = rv["2"]
+        self.assertEqual(bob.guid, client.guid)
+        self.assertEqual(bob.ip, client.ip)
+        self.assertTrue(client.authed)
+
+
+    def test_known_client_with_unverified_guid_and_different_ip_is_not_auth(self):
+        # GIVEN a known client Bob
+        bob = FakeClient(self.parser, name="bob", guid="80a50000000000000000000000fcbc7d", ip="1.2.3.4")
+        bob.save()
+        # WHEN
+        when(self.parser.output).write('players').thenReturn('''\
+Players on server:
+[#] [IP Address]:[Port] [Ping] [GUID] [Name]
+--------------------------------------------------
+2   4.6.8.10:2316       47   80a50000000000000000000000fcbc7d(?)  bob
+(1 players in total)
+''')
+        rv = self.parser.sync()
+        # THEN
+        self.assertIn('2', rv)
+        client = rv["2"]
+        self.assertEqual("bob", client.name)
+        self.assertEqual("4.6.8.10", client.ip)
+        self.assertEqual('', client.guid)
+        self.assertFalse(client.authed)
+
+
+    def test_unknown_client_with_unverified_guid(self):
+        # WHEN
+        when(self.parser.output).write('players').thenReturn('''\
+Players on server:
+[#] [IP Address]:[Port] [Ping] [GUID] [Name]
+--------------------------------------------------
+2   4.6.8.10:2316       47   80a50000000000000000000000fcbc7d(?)  bob
+(1 players in total)
+''')
+        rv = self.parser.sync()
+        # THEN
+        self.assertIn('2', rv)
+        client = rv["2"]
+        self.assertEqual("bob", client.name)
+        self.assertEqual("4.6.8.10", client.ip)
+        self.assertEqual('', client.guid)
+        self.assertFalse(client.authed)
+
+    def test_unknown_client_with_verified_guid(self):
+        # WHEN
+        when(self.parser.output).write('players').thenReturn('''\
+Players on server:
+[#] [IP Address]:[Port] [Ping] [GUID] [Name]
+--------------------------------------------------
+2   4.6.8.10:2316       47   80a50000000000000000000000fcbc7d(OK)  bob
+(1 players in total)
+''')
+        rv = self.parser.sync()
+        # THEN
+        self.assertIn('2', rv)
+        client = rv["2"]
+        self.assertEqual("bob", client.name)
+        self.assertEqual("4.6.8.10", client.ip)
+        self.assertEqual('80a50000000000000000000000fcbc7d', client.guid)
+        self.assertTrue(client.authed)
+
+
 
 class test_others(Arma2TestCase):
 
